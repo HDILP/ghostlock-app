@@ -196,6 +196,19 @@ atomic_int consumer_inflight;
 atomic_int main_route_delay_usec;
 int memfd_leak;
 
+/* Diagnostic: persist a marker to disk before each consumer punch step so a
+ * kernel panic can be pinpointed to the exact syscall (fsync'd, survives
+ * panic-style reboot as long as the file system commits). */
+static void punch_mark(const char *tag, int seq) {
+  int fd = open("/data/local/tmp/punch_seq", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd < 0) return;
+  char buf[96];
+  int n = snprintf(buf, sizeof(buf), "%s %d\n", tag, seq);
+  if (n > 0) write(fd, buf, (size_t)n);
+  fsync(fd);
+  close(fd);
+}
+
 void *waiter_thread(void *arg __attribute__((unused))) {
   disable_rseq_for_thread();
   int tid = (int)syscall(SYS_gettid);
@@ -254,12 +267,18 @@ void *consumer_thread(void *arg __attribute__((unused))) {
         atomic_fetch_add(&consumer_calls, 1);
         atomic_store(&consumer_inflight, 1);
         errno = 0;
+        punch_mark("sched", calls_this_seq);
         long sched_ret = sched_setattr_tid(tid, PSELECT_CONSUMER_NICE);
+        punch_mark(sched_ret == 0 ? "sched_ok" : "sched_fail", calls_this_seq);
         if (sched_ret != 0) {
           struct timespec ft = {.tv_sec = 0, .tv_nsec = 50000000};
+          punch_mark("lock", calls_this_seq);
           long fret = futex_op(&f_pi_target, FUTEX_LOCK_PI, 0, &ft, NULL, 0);
+          punch_mark(fret == 0 ? "lock_ok" : "lock_fail", calls_this_seq);
           if (fret == 0) {
+            punch_mark("unlock", calls_this_seq);
             futex_op(&f_pi_target, FUTEX_UNLOCK_PI, 0, NULL, NULL, 0);
+            punch_mark("unlock_done", calls_this_seq);
             sched_ret = 0;
           }
         }
