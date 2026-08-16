@@ -58,6 +58,11 @@ jobs:
   build-apk:
     name: Build APK
     runs-on: ubuntu-latest
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.SIGNING_KEY != '' }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+      KEY_ALIAS_VALUE: ${{ secrets.ALIAS }}
+      KEY_PASSWORD_VALUE: ${{ secrets.KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -111,7 +116,7 @@ jobs:
         run: rustup toolchain link ondk "${{ runner.temp }}/ondk/toolchains/rust"
 
       - name: Decode Android signing key
-        if: ${{ secrets.SIGNING_KEY != '' }}
+        if: ${{ env.HAS_SIGNING_KEY == 'true' }}
         run: echo ${{ secrets.SIGNING_KEY }} | base64 -d > keystore.jks
 
       - name: Build APK
@@ -119,11 +124,11 @@ jobs:
           export ONDK_HOME="${{ runner.temp }}/ondk"
           export ANDROID_NDK_HOME="$ONDK_HOME"
           export NDK_ROOT="$ONDK_HOME"
-          if [ -n "${{ secrets.SIGNING_KEY }}" ]; then
+          if [ "$HAS_SIGNING_KEY" = "true" ]; then
             export KEYSTORE_PATH="../keystore.jks"
-            export KEYSTORE_PASS="${{ secrets.KEY_STORE_PASSWORD }}"
-            export KEY_ALIAS="${{ secrets.ALIAS }}"
-            export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
+            export KEYSTORE_PASS="$KEYSTORE_PASSWORD"
+            export KEY_ALIAS="$KEY_ALIAS_VALUE"
+            export KEY_PASSWORD="$KEY_PASSWORD_VALUE"
             ./gradlew :app:assembleRelease --no-daemon
           else
             ./gradlew :app:assembleDebug --no-daemon
@@ -147,7 +152,9 @@ jobs:
   post_telegram:
     needs: [build-cli, build-apk]
     runs-on: ubuntu-latest
-    if: ${{ success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.BOT_TOKEN != '' }}
+    if: ${{ success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    env:
+      HAS_BOT_TOKEN: ${{ secrets.BOT_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -158,6 +165,7 @@ jobs:
           path: artifacts
 
       - name: Post to Telegram
+        if: ${{ env.HAS_BOT_TOKEN == 'true' }}
         env:
           CHANNEL_ID: ${{ secrets.CHANNEL_ID }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
