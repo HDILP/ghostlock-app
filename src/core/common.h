@@ -43,7 +43,7 @@
 #define KERNEL_PAGE_SETUP_ATTEMPTS 6
 #define SKB_DATA_DELTA (-0xe80LL)
 
-#define MM_STRUCT_SZ 0x500
+#define MM_STRUCT_SZ 0x3c0
 #define MM_ORDER 3
 #define MM_PARTIALS 5
 extern int g_core_main;
