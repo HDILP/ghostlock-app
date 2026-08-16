@@ -28,8 +28,14 @@
 | `6.12.23-android16-5-gf1bdb13583da-ab13761046-4k`      | Red Magic 11 Pro                                |
 | `6.12.30-android16-5-g6e872b4863d6-ab13847919-4k`      | REDMI Note 15 4G, POCO M6 Pro 4G                |
 | `6.12.38-android16-5-g844001fb8721-ab14552068-4k`      | OnePlus 15T                                     |
+| `5.10.226-android12-9-o-gbf90590695a1`                 | OPPO Reno11 Pro (PJJ110) — experimental 5.10 port |
 
 Kernels are matched by exact `uname -r`; unsupported builds are rejected and the app shows the status at the top. Offsets live in `src/kernels/<uname-release>/offsets.h` — add new builds with the extractor's `--register`.
+
+> **5.10 note (experimental):** 5.10 vendor kernels ship without BTF, so the extractor cannot
+> derive `struct_fields` or `pselect_waiter_shift` — they were hand-derived from kallsyms +
+> disassembly for PJJ110 (see [docs/5.10-pjj110.md](docs/5.10-pjj110.md)). The pselect overlay is
+> compiler-layout dependent; expect the write primitive to need runtime tuning on other 5.10 builds.
 
 ## Quick Start
 

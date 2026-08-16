@@ -28,8 +28,14 @@
 | `6.12.23-android16-5-gf1bdb13583da-ab13761046-4k`      | Red Magic 11 Pro                                |
 | `6.12.30-android16-5-g6e872b4863d6-ab13847919-4k`      | REDMI Note 15 4G, POCO M6 Pro 4G                |
 | `6.12.38-android16-5-g844001fb8721-ab14552068-4k`      | OnePlus 15T                                     |
+| `5.10.226-android12-9-o-gbf90590695a1`                 | OPPO Reno11 Pro (PJJ110) — 实验性 5.10 移植      |
 
 按精确 `uname -r` 匹配偏移表，未匹配的内核直接拒绝运行，App 顶部显示支持状态。偏移表在 `src/kernels/<uname-release>/offsets.h`，新内核构建用提取器的 `--register` 添加。
+
+> **5.10 说明（实验性）：** 5.10 vendor 内核无 BTF，提取器无法推导 `struct_fields` 与
+> `pselect_waiter_shift`——PJJ110 的取值由 kallsyms + 反汇编手工推导（见
+> [docs/5.10-pjj110.md](docs/5.10-pjj110.md)）。pselect 栈覆盖依赖编译器布局，其他 5.10
+> 构建的写原语预期需要运行时调参。
 
 ## 快速开始
 
