@@ -104,6 +104,20 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
     uint64_t value;
     const char *name;
   } words[] = {
+#ifdef PSELECT_WORDS_V5_10
+    /* 5.10 rt_mutex_waiter: tree_entry@0, pi_tree_entry@0x18, task@0x30,
+     * lock@0x38, list@0x40 -- no augment prio/deadline, no wake_state. */
+    {2, 0, "tree_pc"},
+    {3, 0, "tree_right"},
+    {4, 0, "tree_left"},
+    {5, 0, "pi_parent"},
+    {6, 0, "pi_right"},
+    {7, 0, "pi_left"},
+    {8, fake_task, "task"},
+    {9, fake_lock, "lock"},
+    {10, 0, "list_next"},
+    {11, 0, "list_prev"},
+#else
     {2, 0, "tree_pc"},
     {3, 0, "tree_right"},
     {4, 0, "tree_left"},
@@ -117,6 +131,7 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
     {12, fake_task, "task"},
     {13, fake_lock, "lock"},
     {14, 3, "wake_state"},
+#endif
   };
   for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++) {
     struct pselect_waiter_word *w = &words[i];

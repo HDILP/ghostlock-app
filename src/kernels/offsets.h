@@ -23,6 +23,15 @@ struct kernel_offsets {
 
 #define OFFSETS_ENTRY(uname, ...) { .uname_r = uname, __VA_ARGS__ }
 
+#define STRUCT_OFFSETS_5_10                                                    \
+  .task_prio = 0x84, .task_normal_prio = 0x8C, .task_sched_task_group = 0x7D8, \
+  .task_pi_lock = 0x86C, .task_pi_waiters = 0x880,                             \
+  .task_pi_top_task = 0x890, .task_pi_blocked_on = 0x898,                      \
+  .task_pid = 0x56C, .task_tgid = 0x570,                                       \
+  .task_atomic_flags = 0, .task_real_cred = 0x778, .task_cred = 0x780,         \
+  .task_comm = 0x790, .task_tasks = 0x608, .task_seccomp = 0x848,              \
+  .kernel_phys_load = 0x80000000
+
 #define STRUCT_OFFSETS_6_12                                                    \
   .task_prio = 0x94, .task_normal_prio = 0x9C, .task_sched_task_group = 0x420, \
   .task_pi_lock = 0x9EC, .task_pi_waiters = 0xA00,                             \

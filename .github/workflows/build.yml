@@ -12,13 +12,49 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: "${{ github.workflow }}-${{ github.ref }}"
+  group: "${{ github.workspace }}-${{ github.ref }}"
   cancel-in-progress: true
 
 env:
   ONDK_VERSION: "r30.1"
 
 jobs:
+  build-cli:
+    name: Build CLI ghostlock
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cache ONDK
+        id: ondk-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/ondk
+          key: ondk-${{ env.ONDK_VERSION }}-linux
+
+      - name: Download ONDK
+        if: steps.ondk-cache.outputs.cache-hit != 'true'
+        run: |
+          url="https://github.com/topjohnwu/ondk/releases/download/${ONDK_VERSION}/ondk-${ONDK_VERSION}-linux.tar.xz"
+          mkdir -p "${{ runner.temp }}/ondk"
+          curl -fL "$url" -o "${{ runner.temp }}/ondk.tar.xz"
+          tar -C "${{ runner.temp }}/ondk" --strip-components=1 -xf "${{ runner.temp }}/ondk.tar.xz"
+
+      - name: Build ghostlock binary
+        run: |
+          make ghostlock NDK_ROOT="${{ runner.temp }}/ondk"
+          file ghostlock || true
+
+      - name: Upload ghostlock binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: ghostlock-cli
+          path: ghostlock
+          archive: false
+
   build-apk:
     name: Build APK
     runs-on: ubuntu-latest
@@ -75,33 +111,43 @@ jobs:
         run: rustup toolchain link ondk "${{ runner.temp }}/ondk/toolchains/rust"
 
       - name: Decode Android signing key
+        if: ${{ secrets.SIGNING_KEY != '' }}
         run: echo ${{ secrets.SIGNING_KEY }} | base64 -d > keystore.jks
 
-      - name: Build Release APK
+      - name: Build APK
         run: |
           export ONDK_HOME="${{ runner.temp }}/ondk"
           export ANDROID_NDK_HOME="$ONDK_HOME"
           export NDK_ROOT="$ONDK_HOME"
-          export KEYSTORE_PATH="../keystore.jks"
-          export KEYSTORE_PASS="${{ secrets.KEY_STORE_PASSWORD }}"
-          export KEY_ALIAS="${{ secrets.ALIAS }}"
-          export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
-          ./gradlew :app:assembleRelease --no-daemon
+          if [ -n "${{ secrets.SIGNING_KEY }}" ]; then
+            export KEYSTORE_PATH="../keystore.jks"
+            export KEYSTORE_PASS="${{ secrets.KEY_STORE_PASSWORD }}"
+            export KEY_ALIAS="${{ secrets.ALIAS }}"
+            export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
+            ./gradlew :app:assembleRelease --no-daemon
+          else
+            ./gradlew :app:assembleDebug --no-daemon
+          fi
 
-      - name: Rename Release APK
-        run: mv app/build/outputs/apk/release/*.apk GhostLock-release.apk
+      - name: Rename APK
+        run: |
+          if [ -f app/build/outputs/apk/release/*.apk ]; then
+            mv app/build/outputs/apk/release/*.apk GhostLock-release.apk
+          else
+            mv app/build/outputs/apk/debug/*.apk GhostLock-debug.apk
+          fi
 
-      - name: Upload Release APK
+      - name: Upload APK
         uses: actions/upload-artifact@v7
         with:
-          name: GhostLock-release
-          path: GhostLock-release.apk
+          name: GhostLock-apk
+          path: GhostLock-*.apk
           archive: false
 
   post_telegram:
-    needs: [build-apk]
+    needs: [build-cli, build-apk]
     runs-on: ubuntu-latest
-    if: ${{ success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.ref_type != 'tag' }}
+    if: ${{ success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && secrets.BOT_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v6
         with:
