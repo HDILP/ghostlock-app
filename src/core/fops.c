@@ -110,8 +110,13 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
      * NOTE: word 9 (waiter->lock) is NOT overwritten: OPPO/QC 5.10
      * remove_waiter has BUG_ON(rt_mutex_top_waiter(lock)->lock != lock)
      * (brk #0x800) and the original lock field (real pi_mutex) must
-     * survive the fd_set overlay or the kernel panics on entry. */
-    {2, 0, "tree_pc"},
+     * survive the fd_set overlay or the kernel panics on entry.
+     * tree_pc = 1 (RB_BLACK): task_blocks_on_rt_mutex() re-inserts the
+     * consumer waiter under the stale fake node; rb_insert_color() sees
+     * the fake parent as RED (pc=0) and dereferences a NULL grandparent
+     * (fake's rb_parent is 0) -> panic. Black marks it as root and the
+     * insert loop breaks without touching the grandparent. */
+    {2, 1, "tree_pc"},
     {3, 0, "tree_right"},
     {4, 0, "tree_left"},
     {5, 0, "pi_parent"},
