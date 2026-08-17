@@ -256,6 +256,16 @@ void *owner_thread(void *arg __attribute__((unused))) {
 void *consumer_thread(void *arg __attribute__((unused))) {
   disable_rseq_for_thread();
   pin_to_core(CONSUMER_CORE);
+
+  /* Phase 2: boost consumer priority to match waiter (nice=-20, priority 100).
+   * Combined with Phase 1's waiter boost, both threads are now at priority 100
+   * vs owner's 120.  This tests whether the consumer's FUTEX_LOCK_PI chain walk
+   * interacts with the waiter in owner's pi_waiters (if Phase 1 put it there). */
+  int consumer_tid = (int)syscall(SYS_gettid);
+  pr_info("consumer: boosting priority nice=-20 (tid=%d)\n", consumer_tid);
+  if (sched_setattr_tid(consumer_tid, -20) == 0)
+    pr_info("consumer: priority boosted to nice=-20\n");
+
   pr_info("consumer thread running on cpu=%d\n", sched_getcpu());
   int seen = 0;
   while (!atomic_load(&punch_consume_stop)) {
