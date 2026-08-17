@@ -267,22 +267,21 @@ void *consumer_thread(void *arg __attribute__((unused))) {
         atomic_fetch_add(&consumer_calls, 1);
         atomic_store(&consumer_inflight, 1);
         errno = 0;
-        punch_mark("sched", calls_this_seq);
-        long sched_ret = sched_setattr_tid(tid, PSELECT_CONSUMER_NICE);
-        punch_mark(sched_ret == 0 ? "sched_ok" : "sched_fail", calls_this_seq);
-        if (sched_ret != 0) {
-          struct timespec ft = {.tv_sec = 0, .tv_nsec = 50000000};
-          punch_mark("lock", calls_this_seq);
-          long fret = futex_op(&f_pi_target, FUTEX_LOCK_PI, 0, &ft, NULL, 0);
-          punch_mark(fret == 0 ? "lock_ok" : "lock_fail", calls_this_seq);
-          if (fret == 0) {
-            punch_mark("unlock", calls_this_seq);
-            futex_op(&f_pi_target, FUTEX_UNLOCK_PI, 0, NULL, NULL, 0);
-            punch_mark("unlock_done", calls_this_seq);
-            sched_ret = 0;
-          }
+        /* Skip sched_setattr: it triggers rt_mutex_adjust_prio_chain while
+         * the waiter is still blocked on the pi_mutex (futex timeout not
+         * yet fired), and the chain walk hits the stale W in the owner's
+         * pi_waiters tree.  Go straight to FUTEX_LOCK_PI which targets the
+         * lock's waiter tree directly (where W->lock is real with NFDS=64). */
+        punch_mark("lock", calls_this_seq);
+        struct timespec ft = {.tv_sec = 0, .tv_nsec = 50000000};
+        long fret = futex_op(&f_pi_target, FUTEX_LOCK_PI, 0, &ft, NULL, 0);
+        punch_mark(fret == 0 ? "lock_ok" : "lock_fail", calls_this_seq);
+        if (fret == 0) {
+          punch_mark("unlock", calls_this_seq);
+          futex_op(&f_pi_target, FUTEX_UNLOCK_PI, 0, NULL, NULL, 0);
+          punch_mark("unlock_done", calls_this_seq);
         }
-        if (sched_ret == 0) atomic_fetch_add(&consumer_success, 1);
+        if (fret == 0) atomic_fetch_add(&consumer_success, 1);
         atomic_store(&consumer_inflight, 0);
         calls_this_seq++;
         if (calls_this_seq >= CONSUMER_MAX_CALLS) {
