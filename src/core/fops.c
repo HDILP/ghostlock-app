@@ -228,7 +228,12 @@ void do_pselect_fake_lock_route(void) {
   pr_info("pselect returned ret=%d errno=%d calls=%d success=%d delay=%d\n",
           ret, saved_errno, calls, success, delay_usec);
 
-  if (calls > 0 && success > 0) {
+  /* 5.10: the write-0 primitive fires during rb_erase (FUTEX_LOCK_PI
+   * timeout path), not when the lock is acquired.  consumer_success is
+   * only incremented on fret==0 (lock acquired), which never happens
+   * while the owner holds the lock.  A successful write is indicated by
+   * consumer_calls > 0 (the erase ran). */
+  if (calls > 0) {
     route_last_step = 0;
     route_last_errno = 0;
   } else {
