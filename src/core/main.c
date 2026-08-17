@@ -217,6 +217,16 @@ void *waiter_thread(void *arg __attribute__((unused))) {
     pr_error("waiter lock chain errno=%d\n", errno);
   atomic_store(&waiter_ready, 1);
   while (!atomic_load(&owner_started)) usleep(1000);
+
+  /* Phase 1: boost waiter priority to nice=-20 (priority 100) so that
+   * rt_mutex_adjust_prio_chain during FUTEX_CMP_REQUEUE_PI sees
+   * waiter(100) > owner(120) and adds the waiter to owner's pi_waiters
+   * tree via pi_tree_entry.  This is the single-variable change for
+   * Phase 1 — consumer, NFDS unchanged. */
+  pr_info("waiter: boosting priority nice=-20 for PI chain test\n");
+  if (sched_setattr_tid(tid, -20) == 0)
+    pr_info("waiter: priority boosted to nice=-20 (tid=%d)\n", tid);
+
   struct timespec timeout;
   SYSCHK(clock_gettime(CLOCK_MONOTONIC, &timeout));
   timeout.tv_sec += ROUTE_WAIT_SECONDS;
