@@ -73,7 +73,7 @@ extern int g_core_consumer;
 #define P0_DATA_ALIAS_CONST(image_addr) \
   (P0_PAGE_OFFSET | ((image_addr) - KIMAGE_TEXT_BASE + P0_KERNEL_PHYS_DELTA))
 
-#define CONSUMER_MAX_CALLS 1
+#define CONSUMER_MAX_CALLS 3
 /* 64 -> 1 word per set -> core_sys_select copies only bits[0..2] onto the
  * waiter (waiter+0x00..+0x17 = tree_entry). pi_tree_entry (+0x18..+0x2f),
  * task (+0x30) and lock (+0x38) are NOT copied and keep their real
@@ -90,11 +90,11 @@ extern int g_core_consumer;
 #define PSELECT_CONSUMER_NICE 19
 #define PSELECT_CONSUMER_BURST_CALLS 1
 #define PSELECT_CONSUMER_SETTLE_USEC 250000
-#define PSELECT_ENTER_DELAY_USEC 50000
+#define PSELECT_ENTER_DELAY_USEC 10000
 #ifndef PSELECT_TIMEOUT_SEC
 #define PSELECT_TIMEOUT_SEC 0
 #endif
-#define PSELECT_TIMEOUT_USEC 200000
+#define PSELECT_TIMEOUT_USEC 500000
 #ifndef ROUTE_WAIT_SECONDS
 #define ROUTE_WAIT_SECONDS 1
 #endif

