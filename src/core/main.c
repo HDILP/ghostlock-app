@@ -327,8 +327,13 @@ int run_main_route_threads(void) {
   pthread_join(owner, NULL);
   pthread_join(consumer, NULL);
 
-  return atomic_load(&consumer_calls) > 0 &&
-         atomic_load(&consumer_success) > 0 && route_last_step == 0;
+  /* 5.10: the write-0 primitive fires during rb_erase (FUTEX_LOCK_PI
+   * timeout path), not when the lock is acquired.  consumer_success is
+   * only incremented on fret==0 (lock acquired), which never happens
+   * while the owner holds the lock.  A successful write is indicated by
+   * consumer_calls > 0 (the erase ran) and route_last_step == 0 (no
+   * internal error). */
+  return atomic_load(&consumer_calls) > 0 && route_last_step == 0;
 }
 
 static int do_one_write(uintptr_t target, const char *desc, int mode, int leaf) {
