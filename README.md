@@ -41,7 +41,7 @@ Kernels are matched by exact `uname -r`; unsupported builds are rejected and the
 
 Open **GhostLock** and tap **Run**. KernelSU (`me.weishu.kernelsu`) or ReSukiSU (`com.resukisu.resukisu`) provides `ksud` for module loading; without it, W1/W2 still grant uid 0 but no module is loaded.
 
-The route races two cores: the main thread hammers `pselect` while a consumer thread perturbs the waiter's priority. The pair defaults to the big cores (fallback 0/1), overridable via `GHOSTLOCK_CORE` / `GHOSTLOCK_CONSUMER_CORE`.
+The route races two cores: the main thread hammers `pselect` while a consumer thread contests the PI mutex via `FUTEX_LOCK_PI`. The pair defaults to the big cores (fallback 0/1), overridable via `GHOSTLOCK_CORE` / `GHOSTLOCK_CONSUMER_CORE`.
 
 ## Command-Line Debugging
 

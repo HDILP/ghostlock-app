@@ -41,7 +41,7 @@
 
 打开 **GhostLock** 点击 **执行**。需先装 KernelSU（`me.weishu.kernelsu`）或 ReSukiSU（`com.resukisu.resukisu`）以提供 `ksud`；缺 `ksud` 时 W1/W2 仍可拿到 uid 0，但不会加载模块。
 
-路线是双核竞争：主线程跑 pselect 爆破，consumer 线程扰动 waiter 优先级。核心对默认取大核（不可用时回退 0/1），可用 `GHOSTLOCK_CORE` / `GHOSTLOCK_CONSUMER_CORE` 覆盖。
+路线是双核竞争：主线程跑 pselect 爆破，consumer 线程通过 `FUTEX_LOCK_PI` 竞争 PI 互斥锁。核心对默认取大核（不可用时回退 0/1），可用 `GHOSTLOCK_CORE` / `GHOSTLOCK_CONSUMER_CORE` 覆盖。
 
 ## 命令行调试
 
