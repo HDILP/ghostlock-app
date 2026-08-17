@@ -107,29 +107,23 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
     const char *name;
   } words[] = {
 #ifdef PSELECT_WORDS_V5_10
-    /* 5.10 rt_mutex_waiter: tree_entry@0, pi_tree_entry@0x18, task@0x30,
-     * lock@0x38, list@0x40 -- no augment prio/deadline, no wake_state.
-     * ONLY words 2..7 are placed: PSELECT_ROUTE_NFDS=128 keeps the copy at
-     * 2 words/set = bits[0..5] = waiter+0x00..+0x28, so task/lock/list are
-     * NOT COPIED AT ALL and keep their real kernel-written values. This is
-     * required: OPPO/QC 5.10 BUG_ON(root->lock != lock) (brk #0x800) in
-     * task_blocks_on_rt_mutex (0x1eaa28), remove_waiter (0x1eb540) and
-     * mark_wakeup_next_waiter (0x1ea138); b2cc201 only removed the explicit
-     * word-9 write but FD_ZERO + the full fd_set copy still zeroed lock and
-     * the consumer's first FUTEX_LOCK_PI panicked on enqueue.
-     * tree_pc = 1 (RB_BLACK): task_blocks_on_rt_mutex() re-inserts the
-     * consumer waiter under the stale fake node; rb_insert_color() sees
-     * the fake parent as RED (pc=0) and dereferences a NULL grandparent
-     * (fake's rb_parent is 0) -> panic. Black marks it as root and the
-     * insert loop breaks without touching the grandparent.
-     * W->task stays the real waiter thread (prio 120, tie with consumer),
-     * so the rb compare sends the consumer waiter to W's right child slot. */
+    /* 5.10 rt_mutex_waiter layout:
+     *   +0x00 tree_entry (__rb_parent_color, rb_right, rb_left) = 24 bytes
+     *   +0x18 pi_tree_entry (same)                             = 24 bytes
+     *   +0x30 task (8)   +0x38 lock (8)   +0x40 list (16)
+     *
+     * PSELECT_ROUTE_NFDS=64 -> 1 word/set = 3 bits total. Only waiter words
+     * 2..4 (tree_entry) are placed; pi_tree_entry words 5..7 are beyond the
+     * copy window and keep real kernel-written values. This is required:
+     *   - pi_tree_entry must stay linked correctly in the owner's
+     *     pi_waiters (rt_mutex_adjust_prio_chain walks it during
+     *     sched_setattr, and parent=0 crashes on traversal).
+     *   - task/lock must stay real (vendor BUG_ON root->lock != lock).
+     * tree_pc = 1 (RB_BLACK): prevents rb_insert_color NULL-grandparent
+     * deref when the consumer waiter is inserted under the stale node. */
     {2, 1, "tree_pc"},
     {3, 0, "tree_right"},
     {4, 0, "tree_left"},
-    {5, 0, "pi_parent"},
-    {6, 0, "pi_right"},
-    {7, 0, "pi_left"},
 #else
     {2, 0, "tree_pc"},
     {3, 0, "tree_right"},

