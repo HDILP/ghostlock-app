@@ -150,6 +150,11 @@ void prepare_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
     {14, 3, "wake_state"},
 #endif
   };
+  /* word 3 maps to waiter+0x08 (rb_right).  This field is what
+   * rb_erase writes to the parent when removing a right child.
+   * For write-0 mode (leaf=1): must be 0 so rb_erase writes 0.
+   * For write-N mode (leaf=0): must be the value to write. */
+  words[1].value = pselect_child_node ? 0 : (uint64_t)pselect_custom_target;
   for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++) {
     struct pselect_waiter_word *w = &words[i];
     pselect_put_waiter_word(
