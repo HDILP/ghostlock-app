@@ -94,7 +94,7 @@ extern int g_core_consumer;
 #ifndef PSELECT_TIMEOUT_SEC
 #define PSELECT_TIMEOUT_SEC 0
 #endif
-#define PSELECT_TIMEOUT_USEC 500000
+#define PSELECT_TIMEOUT_USEC 200000
 #ifndef ROUTE_WAIT_SECONDS
 #define ROUTE_WAIT_SECONDS 1
 #endif
