@@ -34,8 +34,10 @@ Kernels are matched by exact `uname -r`; unsupported builds are rejected and the
 
 > **5.10 note (experimental):** 5.10 vendor kernels ship without BTF, so the extractor cannot
 > derive `struct_fields` or `pselect_waiter_shift` — they were hand-derived from kallsyms +
-> disassembly for PJJ110 (see [docs/5.10-pjj110.md](docs/5.10-pjj110.md)). The pselect overlay is
-> compiler-layout dependent; expect the write primitive to need runtime tuning on other 5.10 builds.
+> disassembly for PJJ110 (see [docs/5.10-pjj110.md](docs/5.10-pjj110.md)). The pi_waiters
+> write path via `rt_mutex_adjust_prio_chain` is structurally unreachable on 5.10 (guard
+> condition `w26=0` always false). The upstream fix (3bfdc63936dd) reveals the real bug is
+> `remove_waiter()` using `current` instead of `waiter->task` — exploitation path TBD.
 
 ## Quick Start
 

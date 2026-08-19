@@ -34,8 +34,10 @@
 
 > **5.10 说明（实验性）：** 5.10 vendor 内核无 BTF，提取器无法推导 `struct_fields` 与
 > `pselect_waiter_shift`——PJJ110 的取值由 kallsyms + 反汇编手工推导（见
-> [docs/5.10-pjj110.md](docs/5.10-pjj110.md)）。pselect 栈覆盖依赖编译器布局，其他 5.10
-> 构建的写原语预期需要运行时调参。
+> [docs/5.10-pjj110.md](docs/5.10-pjj110.md)）。`rt_mutex_adjust_prio_chain` 中的
+> pi_waiters 写路径在 5.10 上结构性不可达（guard 条件 `w26=0` 恒假）。上游修复
+> （3bfdc63936dd）揭示真正 bug 是 `remove_waiter()` 用 `current` 替代 `waiter->task`——
+> 利用路径待定。
 
 ## 快速开始
 
