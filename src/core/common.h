@@ -86,7 +86,7 @@ extern int g_core_consumer;
  * pi_tree_entry.__rb_parent_color = (target-8)|1 so that consumer's
  * FUTEX_LOCK_PI chain walk rb_erase writes to the target.
  * task(+0x30) and lock(+0x38) are still beyond the copy window. */
-#define PSELECT_ROUTE_NFDS 128
+#define PSELECT_ROUTE_NFDS 320
 #define PSELECT_CONSUMER_NICE 19
 #define PSELECT_CONSUMER_BURST_CALLS 1
 #define PSELECT_CONSUMER_SETTLE_USEC 250000
