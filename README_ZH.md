@@ -32,10 +32,10 @@
 
 按精确 `uname -r` 匹配偏移表，未匹配的内核直接拒绝运行，App 顶部显示支持状态。偏移表在 `src/kernels/<uname-release>/offsets.h`，新内核构建用提取器的 `--register` 添加。
 
-> **5.10 说明（已阻断）：** 所有已知利用路径在5.10 vendor内核上均不可行：
-> (1) pi_waiters rb_erase 不可达 (guard w26=0 恒假), (2) NFDS=320 pselect 覆写被 vendor
-> `BUG_ON(root->lock!=lock)` 阻止, (3) dangling pi_blocked_on 被 `try_to_take_rt_mutex`
-> 清除, (4) KGSL GPU exploit 已修补。详见 [docs/5.10-pjj110.md](docs/5.10-pjj110.md)。
+> **5.10 说明（实验性）：** 5.10 移植目标为 OPPO Reno11 Pro (PJJ110)。
+> 通过 pselect fd_set overlay 在 consumer waiter 的 tree_entry 上实现了 write-0 原语，
+> 但当前写入未命中 `selinux_enforcing` — 目标地址需进一步调查。
+> NFDS=320 BUG_ON bypass 路径已识别但尚未实现。详见 [docs/5.10-pjj110.md](docs/5.10-pjj110.md)。
 
 ## 快速开始
 

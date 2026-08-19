@@ -32,10 +32,11 @@
 
 Kernels are matched by exact `uname -r`; unsupported builds are rejected and the app shows the status at the top. Offsets live in `src/kernels/<uname-release>/offsets.h` — add new builds with the extractor's `--register`.
 
-> **5.10 note (blocked):** All known exploit paths are blocked on 5.10 vendor kernels:
-> (1) pi_waiters rb_erase unreachable (guard w26=0 always false), (2) NFDS=320 pselect overlay
-> blocked by vendor `BUG_ON(root->lock!=lock)`, (3) dangling pi_blocked_on cleared by
-> `try_to_take_rt_mutex`, (4) KGSL GPU exploit patched. See [docs/5.10-pjj110.md](docs/5.10-pjj110.md).
+> **5.10 note (experimental):** The 5.10 port targets OPPO Reno11 Pro (PJJ110).
+> A write-0 primitive exists via pselect fd_set overlay on the consumer waiter's
+> tree_entry, but the write currently misses `selinux_enforcing` — the target
+> address needs further investigation. NFDS=320 BUG_ON bypass path identified
+> but not yet implemented. See [docs/5.10-pjj110.md](docs/5.10-pjj110.md).
 
 ## Quick Start
 
