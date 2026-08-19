@@ -32,12 +32,10 @@
 
 Kernels are matched by exact `uname -r`; unsupported builds are rejected and the app shows the status at the top. Offsets live in `src/kernels/<uname-release>/offsets.h` — add new builds with the extractor's `--register`.
 
-> **5.10 note (experimental):** 5.10 vendor kernels ship without BTF, so the extractor cannot
-> derive `struct_fields` or `pselect_waiter_shift` — they were hand-derived from kallsyms +
-> disassembly for PJJ110 (see [docs/5.10-pjj110.md](docs/5.10-pjj110.md)). The pi_waiters
-> write path via `rt_mutex_adjust_prio_chain` is structurally unreachable on 5.10 (guard
-> condition `w26=0` always false). The upstream fix (3bfdc63936dd) reveals the real bug is
-> `remove_waiter()` using `current` instead of `waiter->task` — exploitation path TBD.
+> **5.10 note (blocked):** All known exploit paths are blocked on 5.10 vendor kernels:
+> (1) pi_waiters rb_erase unreachable (guard w26=0 always false), (2) NFDS=320 pselect overlay
+> blocked by vendor `BUG_ON(root->lock!=lock)`, (3) dangling pi_blocked_on cleared by
+> `try_to_take_rt_mutex`, (4) KGSL GPU exploit patched. See [docs/5.10-pjj110.md](docs/5.10-pjj110.md).
 
 ## Quick Start
 

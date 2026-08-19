@@ -32,12 +32,10 @@
 
 按精确 `uname -r` 匹配偏移表，未匹配的内核直接拒绝运行，App 顶部显示支持状态。偏移表在 `src/kernels/<uname-release>/offsets.h`，新内核构建用提取器的 `--register` 添加。
 
-> **5.10 说明（实验性）：** 5.10 vendor 内核无 BTF，提取器无法推导 `struct_fields` 与
-> `pselect_waiter_shift`——PJJ110 的取值由 kallsyms + 反汇编手工推导（见
-> [docs/5.10-pjj110.md](docs/5.10-pjj110.md)）。`rt_mutex_adjust_prio_chain` 中的
-> pi_waiters 写路径在 5.10 上结构性不可达（guard 条件 `w26=0` 恒假）。上游修复
-> （3bfdc63936dd）揭示真正 bug 是 `remove_waiter()` 用 `current` 替代 `waiter->task`——
-> 利用路径待定。
+> **5.10 说明（已阻断）：** 所有已知利用路径在5.10 vendor内核上均不可行：
+> (1) pi_waiters rb_erase 不可达 (guard w26=0 恒假), (2) NFDS=320 pselect 覆写被 vendor
+> `BUG_ON(root->lock!=lock)` 阻止, (3) dangling pi_blocked_on 被 `try_to_take_rt_mutex`
+> 清除, (4) KGSL GPU exploit 已修补。详见 [docs/5.10-pjj110.md](docs/5.10-pjj110.md)。
 
 ## 快速开始
 
