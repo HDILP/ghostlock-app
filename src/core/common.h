@@ -48,6 +48,8 @@
 #define MM_PARTIALS 5
 extern int g_core_main;
 extern int g_core_consumer;
+extern int g_consumer_nice;
+extern int g_waiter_nice;
 #define CORE (g_core_main)
 #define CONSUMER_CORE (g_core_consumer)
 #define KSNITCH_COLLISIONS 4
