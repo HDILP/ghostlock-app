@@ -33,9 +33,9 @@
 按精确 `uname -r` 匹配偏移表，未匹配的内核直接拒绝运行，App 顶部显示支持状态。偏移表在 `src/kernels/<uname-release>/offsets.h`，新内核构建用提取器的 `--register` 添加。
 
 > **5.10 说明（实验性）：** 5.10 移植目标为 OPPO Reno11 Pro (PJJ110)。
-> 通过 pselect fd_set overlay 在 consumer waiter 的 tree_entry 上实现了 write-0 原语，
-> 但当前写入未命中 `selinux_enforcing` — 目标地址需进一步调查。
-> NFDS=320 BUG_ON bypass 路径已识别但尚未实现。详见 [docs/5.10-pjj110.md](docs/5.10-pjj110.md)。
+> write-0 原语向 requeued waiter 的 `rb_right` 字段（内核栈上的 `W+0x08`）写入 NULL。
+> 这是一个 **内核栈 corruption 原语**，不是 arbitrary kernel write —
+> `W+0x08` 是栈地址，不是内核数据地址。详见 [docs/5.10-pjj110.md](docs/5.10-pjj110.md)。
 
 ## 快速开始
 
