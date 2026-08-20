@@ -206,6 +206,9 @@ void do_pselect_fake_lock_route(void);
 void reset_main_route_state(void);
 int run_main_route_threads(void);
 void set_pselect_write_mode(uintptr_t target, int mode);
+int perf_sp_leak_experiment(void);
+void perf_sp_start(void);
+void perf_sp_stop_and_report(void);
 
 #include "runtime_struct_offsets.h"
 
