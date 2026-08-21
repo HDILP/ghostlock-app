@@ -45,7 +45,7 @@ all: ghostlock
 ghostlock: $(SRCS) $(EMBED_EXP64)
 	@echo "Using NDK compiler: $(NDK_CC)"
 	@echo "Target config: $(TARGET_CONFIG)"
-	$(NDK_CC) $(CFLAGS) $(LDFLAGS) $^ -o ghostlock
+	$(NDK_CC) $(CFLAGS) $(LDFLAGS) $(filter %.c %.S,$^) -o ghostlock
 
 $(EMBED_EXP64): src/exp64/main.c src/exp64/stack.c | $(EMBED_DIR)
 	@echo "Building embedded exp64 stage: $(NDK_CC64)"
