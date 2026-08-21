@@ -162,6 +162,8 @@ extern int route_last_errno;
 extern int memfd_leak;
 
 int run_exploit(int argc, char **argv);
+int exp64_stack_once(uint64_t *buffer);
+int install_embedded_exp64(void);
 void read_first_line(const char *path, char *buf, size_t len);
 void log_startup_context(void);
 void init_cpu_config(void);
