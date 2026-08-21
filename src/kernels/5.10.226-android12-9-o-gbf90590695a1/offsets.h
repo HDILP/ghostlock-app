@@ -7,7 +7,7 @@ OFFSETS_ENTRY(
     .off_init_task = 0x27bc000,
     .off_init_cred = 0x27d0be0,
     .off_root_task_group = 0x29b7040,
-    .off_selinux_enforcing = 0x2a683c8,
+    .off_selinux_enforcing = 0x2a68450,  /* FIXED: kallsyms says 0x2a683c8==selinux_checkreqprot_boot(read-only); selinux_state.enforcing=0x2a68450 */
     .off_selinux_blob_sizes = 0x22ff320,
     .off_security_hook_heads = 0x22fec88,
     .off_slide_nfulnl_logger = 0x27b14b8,

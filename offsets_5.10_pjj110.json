@@ -4,15 +4,15 @@
   "kernel_phys_load": 2147483648,
   "pselect_waiter_shift": -2,
   "symbols": {
-   "off_init_task": 41664512,
-   "off_init_cred": 41749472,
-   "off_root_task_group": 43741248,
-   "off_selinux_enforcing": 44467144,
-   "off_selinux_blob_sizes": 36696864,
-   "off_security_hook_heads": 36695176,
-   "off_slide_nfulnl_logger": 41620664,
-   "off_slide_boot_id": 45648749,
-   "off_slide_loggers_0_1": 41620464
+   "off_init_task": 41669248,
+   "off_init_cred": 41749640,
+   "off_root_task_group": 43741696,
+   "off_selinux_enforcing": 44467280,
+   "off_selinux_blob_sizes": 36696888,
+   "off_security_hook_heads": 36696840,
+   "off_slide_nfulnl_logger": 41620696,
+   "off_slide_boot_id": 45648768,
+   "off_slide_loggers_0_1": 41620664
   },
   "struct_fields": {
    "task_prio": 132,
