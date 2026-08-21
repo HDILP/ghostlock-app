@@ -36,6 +36,16 @@
 > write-0 原语向 requeued waiter 的 `rb_right` 字段（内核栈上的 `W+0x08`）写入 NULL。
 > 这是一个 **内核栈 corruption 原语**，不是 arbitrary kernel write —
 > `W+0x08` 是栈地址，不是内核数据地址。详见 [docs/5.10-pjj110.md](docs/5.10-pjj110.md)。
+>
+> **2026-08-21 偏移修正记录：** 内置表的 PJJ110 偏移曾经系统性错误（init_task +
+> 0x1280、init_cred +0xa8、root_task_group +0x1c0、selinux_enforcing +0x88 …），
+> 已从恢复的完整 kallsyms（`tools/kallsyms_recover.py`）逐项修正并提交。
+> `off_selinux_enforcing = 0x2a68450`（`selinux_state.enforcing`），旧值 0x2a683c8
+> 实为只读的 `selinux_checkreqprot_boot`。真机验证（2026-08-21，CI CLI + 导入
+> offsets.json）：符号/KASLR/slide 解算正确，但 **pselect 路线原语无法写到 .data**
+> （30/30 `success=0`，enforce 保持 1）——与上文 write-0 定性一致；完整利用依赖
+> 实验性 exp32 路线（见 `src/exp32/`，`EXP32_STAMP_OFF` 为 S22U 实测值，PJJ110
+> 未测量）。
 
 ## 快速开始
 
