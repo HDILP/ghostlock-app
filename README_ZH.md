@@ -43,9 +43,15 @@
 > `off_selinux_enforcing = 0x2a68450`（`selinux_state.enforcing`），旧值 0x2a683c8
 > 实为只读的 `selinux_checkreqprot_boot`。真机验证（2026-08-21，CI CLI + 导入
 > offsets.json）：符号/KASLR/slide 解算正确，但 **pselect 路线原语无法写到 .data**
-> （30/30 `success=0`，enforce 保持 1）——与上文 write-0 定性一致；完整利用依赖
-> 实验性 exp32 路线（见 `src/exp32/`，`EXP32_STAMP_OFF` 为 S22U 实测值，PJJ110
-> 未测量）。
+> （30/30 `success=0`，enforce 保持 1）——与上文 write-0 定性一致。
+>
+> **2026-08-22 exp64 路线记录：** 静态反汇编证实 PJJ110 的
+> `__arm64_compat_sys_setsockopt/getsockopt` 是 ENOSYS 桩（`mov x0,#-0x26; ret`），
+> 32-bit compat stamp 路径（exp32）结构性死路。已移植 **exp64**（native 64-bit
+> 路线，见 `src/exp64/` + `src/core/exp64_launcher.c`），`GHOSTLOCK_ROUTE=exp64`
+> 开关启用。真机运行成功触发 kernel panic（`Comm: cve-exp64`，crash 于
+> `rt_mutex_adjust_prio_chain+0x188`，NULL deref）——consumer 触发链已打通，
+> 当前 `EXP64_STAMP_OFF=0x60` 为 S22U 占位值，PJJ110 未实测，需重测。
 
 ## 快速开始
 
